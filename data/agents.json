@@ -1,0 +1,56 @@
+{
+  "agents": [
+    {
+      "id": "agent_001",
+      "name": "Thomas",
+      "age": 42,
+      "job": "Farmer",
+      "personality": "Hardworking and simple-hearted. Deeply sensitive to weather and harvests. Despises debt and always pays what he owes.",
+     "initial_wealth": 3000,
+      "initial_location": "Farm",
+      "initial_inventory": {
+        "wheat": 10,
+        "vegetables": 5
+      }
+    },
+    {
+      "id": "agent_002",
+      "name": "Edmund",
+      "age": 38,
+      "job": "Blacksmith",
+      "personality": "Quiet and proud of his craft. Takes great pride in the quality of his work and dislikes haggling.",
+      "initial_wealth": 8000,
+      "initial_location": "Smithy",
+      "initial_inventory": {
+        "farming_tools": 3,
+        "sword": 2
+      }
+    },
+    {
+      "id": "agent_003",
+      "name": "Gilbert",
+      "age": 45,
+      "job": "Merchant",
+      "personality": "Talkative and sharp-eyed. Puts profit above all else and has a keen interest in gathering information.",
+      "initial_wealth": 24000,
+      "initial_location": "Market",
+      "initial_inventory": {
+        "wheat": 5,
+        "farming_tools": 1
+      }
+    },
+    {
+      "id": "agent_004",
+      "name": "Margaret",
+      "age": 50,
+      "job": "Innkeeper",
+      "personality": "Warm and sociable. Always the first to hear village news and prides herself on staying neutral.",
+      "initial_wealth": 16000,
+      "initial_location": "Inn",
+      "initial_inventory": {
+        "food": 20,
+        "ale": 10
+      }
+    }
+  ]
+}
