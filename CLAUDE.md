@@ -42,6 +42,8 @@ section described work that was never committed.)*
   `TickHistory`, `SimState` (world tick counter).
 - `data/village.db` is runtime state: gitignored, regenerated from
   `data/agents.json` on startup. Delete it to reset the world.
+- `.claude/launch.json` holds the dev-server config so Claude Code's
+  browser preview can start uvicorn (local port 8000).
 
 ### Agents
 Four agents, defined together in **`data/agents.json`** (single file, one
@@ -131,8 +133,16 @@ entry per agent, includes `workplace`):
   adapter changes the MAC and breaks the reservation / SSH.** Don't swap it
   without re-doing the router reservation.
 
-### Deployment target
-- **Oracle Cloud free-tier ARM instance** for eventual public hosting.
+### Deployment — LIVE (since 2026-07-14)
+- Deployed on an **Oracle Cloud instance** (Ubuntu 22.04 x86_64, 1 GB RAM),
+  running via `nohup` (**not boot-persistent** — it dies on reboot;
+  registering a systemd service was deliberately deferred by the developer
+  on 2026-07-15, ask before setting it up).
+- No LLM on that box → the simulation runs on the rule-based fallback.
+  For real LLM behavior set `LLM_BASE_URL` (e.g. Groq) in the environment.
+- **Addresses, SSH access, ports and the restart procedure live in
+  `CLAUDE.local.md`** (gitignored — this repo is public, so no
+  infrastructure details belong in committed files).
 
 ---
 
@@ -165,6 +175,15 @@ Backend world + movement first; frontend after.
   fine-tuning is attempted.
 - **Pre-built `llama.cpp` binaries and pip packages** hit GPU-architecture
   compatibility issues — **building from source with CUDA is the fix.**
+- **`pkill -f uvicorn` over SSH kills your own session**: the remote
+  `bash -c` command line contains the pattern too. Kill by PID
+  (`pgrep -af venv/bin/uvicorn` first), or bracket-escape the pattern.
+- **Driving `ssh` from Windows PowerShell mangles quotes**: inner double
+  quotes in the remote command get stripped by PowerShell 5.1 argument
+  parsing. Prefer remote commands that need no nested quoting.
+- The deployment box has a **pending kernel upgrade** — it will want a
+  reboot at some point; remember the app doesn't auto-start (see §5 and
+  `CLAUDE.local.md`).
 
 ---
 
@@ -193,7 +212,8 @@ truth from the actual repo:
 1. Read the repo structure and existing modules.
 2. Check the **FastAPI entry point and route definitions**.
 3. Check the **SQLAlchemy models / DB schema**.
-4. Check the **agent JSON config schema** and the four agent files.
+4. Check the **agent JSON config schema** in `data/agents.json` (one file,
+   four agents).
 5. Check the **tick engine** implementation and how it calls the LLM.
 6. Confirm current **ChromaDB** integration status.
 7. Confirm how the **LLM endpoint is configured** (local LM Studio vs. the

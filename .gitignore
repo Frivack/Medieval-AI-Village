@@ -219,3 +219,6 @@ __marimo__/
 
 # Runtime state — regenerated from data/agents.json on startup
 data/village.db
+
+# Local-only notes with infrastructure details — never commit
+CLAUDE.local.md
