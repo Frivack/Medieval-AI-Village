@@ -13,11 +13,12 @@ SYSTEM_PROMPT = """You are role-playing a villager in a medieval village simulat
 Decide the villager's next action for this five-minute tick.
 
 Respond with ONLY a JSON object, no other text:
-{"action": "MOVE|WORK|TALK|TRADE|REST|OBSERVE", "target": "<building name or villager name or null>", "dialogue": "<one short sentence if TALK, else null>"}
+{"action": "MOVE|WORK|TALK|TRADE|REST|OBSERVE", "target": "<building name or villager name or null>", "dialogue": "<one short sentence if TALK, else null>", "item": "<item name if TRADE, else null>", "quantity": <number if TRADE, else null>}
 
 Rules:
 - MOVE target must be one of the buildings listed.
 - TALK target must be a villager in the same place; include a short in-character dialogue line.
+- TRADE means you BUY item x quantity from a villager in the same place; you must be able to afford it.
 - WORK only makes sense at your workplace.
 - Villagers sleep at night (REST) and work during the day."""
 
@@ -44,7 +45,7 @@ def _build_user_prompt(agent, ctx: dict) -> str:
         f"Your wealth: {agent.wealth} copper. Inventory: {json.dumps(agent.inventory)}.\n"
         f"Villagers at the same place: {nearby}.\n"
         f"Buildings: {', '.join(ctx['buildings'])}.\n"
-        f"What do you do this hour?"
+        f"What do you do right now?"
     )
 
 
@@ -62,6 +63,8 @@ def _parse_decision(raw: str):
         "action": action,
         "target": data.get("target"),
         "dialogue": data.get("dialogue"),
+        "item": data.get("item"),
+        "quantity": data.get("quantity"),
     }
 
 
@@ -74,9 +77,16 @@ def _rule_based(agent, ctx: dict) -> dict:
         if agent.location != agent.workplace:
             return {"action": ActionType.MOVE, "target": agent.workplace, "dialogue": None}
         return {"action": ActionType.WORK, "target": None, "dialogue": None}
-    # Evening: gather at the inn and chat.
+    # Evening: gather at the inn, buy a meal, and chat.
     if agent.location != "Inn":
         return {"action": ActionType.MOVE, "target": "Inn", "dialogue": None}
+    # Once per hour (minute-0 tick), buy a meal from the innkeeper. Four
+    # evening hours x 3 guests = 12 meals/day, which exactly matches what
+    # the innkeeper's WORK produces (1 food/hour x 12h).
+    if (agent.job != "Innkeeper" and ctx["minute"] == 0
+            and "Margaret" in ctx["nearby_agents"]):
+        return {"action": ActionType.TRADE, "target": "Margaret",
+                "item": "food", "quantity": 1, "dialogue": None}
     if ctx["nearby_agents"]:
         return {
             "action": ActionType.TALK,

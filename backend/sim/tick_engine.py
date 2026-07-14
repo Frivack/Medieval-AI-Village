@@ -1,11 +1,13 @@
 # backend/sim/tick_engine.py
-# Advances the world by one tick (= one in-game hour).
+# Advances the world by one tick (= 5 in-game minutes).
 # Per agent: continue an in-progress move (1 tile per tick), otherwise
 # ask the decider for a new action and execute it.
 from backend.config import TICKS_PER_DAY, TICKS_PER_HOUR, MINUTES_PER_TICK
 from backend.database import SessionLocal, AgentState, TickHistory, SimState
 from backend.sim.actions import ActionType, JOB_PRODUCT
 from backend.sim.decider import decide
+from backend.sim.prices import price_of
+from backend.utils.currency import to_string
 from backend.world.map import village_map
 from backend.world.pathfinding import find_path
 
@@ -35,12 +37,23 @@ def run_tick() -> dict:
 
         for agent in agents:
             entry = _step_agent(db, agent, agents, time)
+            # A trade settles for two agents at once; the seller side is
+            # recorded as its own history row so both incomes are queryable.
+            seller_side = entry.pop("seller_side", None)
             db.add(TickHistory(
                 tick=sim.tick,
                 agent_id=agent.id,
                 action=entry["action"],
                 dialogue=entry.get("dialogue"),
+                gold_change=entry.get("copper_change", 0),
             ))
+            if seller_side:
+                db.add(TickHistory(
+                    tick=sim.tick,
+                    agent_id=seller_side["agent_id"],
+                    action=ActionType.TRADE.value,
+                    gold_change=seller_side["copper_change"],
+                ))
             results.append({"agent": agent.name, **entry})
 
         db.commit()
@@ -71,11 +84,12 @@ def _step_agent(db, agent, all_agents, time: dict) -> dict:
         return _do_work(agent, time)
     if action == ActionType.TALK:
         return _do_talk(agent, all_agents, decision)
+    if action == ActionType.TRADE:
+        return _do_trade(agent, all_agents, decision)
     if action == ActionType.REST:
         agent.status = "resting"
         agent.talking_to = None
         return {"action": ActionType.REST.value, "detail": f"resting at {agent.location}"}
-    # TRADE is not implemented yet — treated as OBSERVE for now.
     agent.status = "observing"
     agent.talking_to = None
     return {"action": ActionType.OBSERVE.value, "detail": f"looking around {agent.location}"}
@@ -136,6 +150,58 @@ def _do_work(agent, time: dict) -> dict:
                 "detail": f"produced 1 {product} at {agent.location}"}
     return {"action": ActionType.WORK.value,
             "detail": f"working at {agent.location}"}
+
+
+def _do_trade(agent, all_agents, decision: dict) -> dict:
+    """Buyer-initiated trade: `agent` buys item x quantity from `target`.
+
+    Settles atomically at the base price — validates partner presence,
+    seller stock and buyer funds, then moves items and copper both ways.
+    Any failed precondition degrades to OBSERVE, like _do_talk/_start_move.
+    """
+    target_name = decision.get("target")
+    item = decision.get("item")
+    try:
+        quantity = max(1, int(decision.get("quantity") or 1))
+    except (TypeError, ValueError):
+        quantity = 1
+
+    seller = next((a for a in all_agents
+                   if a.name == target_name and a.location == agent.location
+                   and a.id != agent.id), None)
+    fail = None
+    if seller is None:
+        fail = f"wanted to buy from {target_name}, but they're not here"
+    elif (total := price_of(item, quantity)) is None:
+        fail = f"wanted to buy unknown item '{item}'"
+    elif (seller.inventory or {}).get(item, 0) < quantity:
+        fail = f"{seller.name} has no {item} to sell"
+    elif agent.wealth < total:
+        fail = f"can't afford {quantity} {item} ({to_string(total)})"
+    if fail:
+        agent.status = "observing"
+        agent.talking_to = None
+        return {"action": ActionType.OBSERVE.value, "detail": fail}
+
+    buyer_inv = dict(agent.inventory or {})
+    buyer_inv[item] = buyer_inv.get(item, 0) + quantity
+    agent.inventory = buyer_inv
+    seller_inv = dict(seller.inventory)
+    seller_inv[item] -= quantity
+    if seller_inv[item] == 0:
+        del seller_inv[item]
+    seller.inventory = seller_inv
+    agent.wealth -= total
+    seller.wealth += total
+
+    agent.status = "trading"
+    agent.talking_to = None
+    return {
+        "action": ActionType.TRADE.value,
+        "detail": f"bought {quantity} {item} from {seller.name} for {to_string(total)}",
+        "copper_change": -total,
+        "seller_side": {"agent_id": seller.id, "copper_change": total},
+    }
 
 
 def _do_talk(agent, all_agents, decision: dict) -> dict:

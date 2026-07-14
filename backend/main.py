@@ -68,6 +68,7 @@ def get_history(limit: int = 50):
               .limit(limit).all())
     return [
         {"tick": r.tick, "agent_id": r.agent_id,
-         "action": r.action, "dialogue": r.dialogue}
+         "action": r.action, "dialogue": r.dialogue,
+         "copper_change": r.gold_change}
         for r in rows
     ]

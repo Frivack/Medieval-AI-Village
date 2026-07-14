@@ -37,14 +37,14 @@ class TickHistory(Base):
     agent_id = Column(String)
     action = Column(String)
     dialogue = Column(String)
-    gold_change = Column(Float, default=0.0)
+    gold_change = Column(Float, default=0.0)  # in copper (name predates the copper economy)
     created_at = Column(DateTime, default=datetime.now)
 
 
 class SimState(Base):
     """World-level state. Single row (id=1) holding the tick counter.
 
-    1 tick = 1 in-game hour; day/hour are derived from tick, not stored.
+    1 tick = 5 in-game minutes; day/hour/minute are derived from tick, not stored.
     """
     __tablename__ = "sim_state"
 

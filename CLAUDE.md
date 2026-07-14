@@ -62,9 +62,14 @@ entry per agent, includes `workplace`):
   buildings with walls/floor/door). `GET /map` serializes it.
 - **A\* pathfinding:** `backend/world/pathfinding.py`, 4-directional,
   agents move **1 tile per tick**; remaining path is stored on the agent row.
-- **Structured actions:** `MOVE`, `WORK`, `TALK`, `REST`, `OBSERVE` executed
-  in `backend/sim/tick_engine.py`. `TRADE` is declared but not implemented
-  yet (falls back to OBSERVE).
+- **Structured actions:** `MOVE`, `WORK`, `TALK`, `TRADE`, `REST`, `OBSERVE`
+  executed in `backend/sim/tick_engine.py`. TRADE v1 is buyer-initiated at
+  fixed base prices (`backend/sim/prices.py`): validates partner presence,
+  seller stock and buyer funds, then settles items + copper atomically and
+  records both sides in `TickHistory` (`gold_change` column, value in
+  copper). The rule-based fallback buys a meal from the innkeeper on
+  minute-0 evening ticks at the Inn. LLM price negotiation is planned as
+  v2 on top of the same settlement core.
 - **Time:** **1 tick = 5 in-game minutes** (12 ticks/hour, 288/day);
   day/hour/minute derived from `SimState.tick`. Chosen because 1 tick =
   1 hour made 1-tile-per-tick travel absurdly slow (two days to cross
@@ -154,9 +159,9 @@ Backend world + movement first; frontend after.
 1. ~~**Tile-based open-world map**~~ ✅ done — 100×50 grid, walkable/resource
    tiles, building interiors (`backend/world/`).
 2. ~~**A\* pathfinding**~~ ✅ done — agents move 1 tile per tick.
-3. **Structured action types** — mostly done: `MOVE`, `WORK`, `TALK`, `REST`,
-   `OBSERVE` work; **`TRADE` still needs a real implementation** (price
-   negotiation, inventory/copper exchange between agents).
+3. ~~**Structured action types**~~ ✅ done — all six actions work; TRADE v1
+   settles at fixed base prices (LLM **price negotiation** deferred to a
+   v2 layered on the same settlement core in `_do_trade`).
 4. ~~**Time system**~~ ✅ done — 1 tick = 5 in-game minutes (`SimState.tick`).
 5. **Agent memory** — write observations/conversations into
    `short_term_memory`, then ChromaDB retrieval (Generative Agents style).

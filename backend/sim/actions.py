@@ -11,8 +11,7 @@ class ActionType(str, Enum):
     OBSERVE = "OBSERVE"
 
 
-# What each job produces when it WORKs (placeholder economy until
-# TRADE is fully implemented).
+# What each job produces when it WORKs.
 JOB_PRODUCT = {
     "Farmer": "wheat",
     "Blacksmith": "farming_tools",
