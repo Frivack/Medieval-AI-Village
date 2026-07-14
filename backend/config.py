@@ -2,7 +2,7 @@
 # Central place for environment-dependent settings.
 # Swap LLM endpoints by changing env vars, not code (see CLAUDE.md §3):
 #   - LM Studio (local dev):       http://localhost:1234/v1
-#   - Secondary machine (1080 Ti): http://<REDACTED-IP>:8000/v1
+#   - Secondary machine (1080 Ti): http://<its-LAN-IP>:8000/v1 (IP in CLAUDE.local.md)
 #   - Groq (deployment):           https://api.groq.com/openai/v1
 import os
 

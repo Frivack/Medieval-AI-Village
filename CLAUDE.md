@@ -126,9 +126,10 @@ entry per agent, includes `workplace`):
 
 ### Networking / SSH
 - Main → secondary over the **local network via SSH**, using **MobaXterm** on Windows.
-- Secondary connects through a **USB wireless LAN adapter**:
-  - MAC: `<REDACTED-MAC>`
-  - Fixed IP: `<REDACTED-IP>` (DHCP reservation by MAC on the home router).
+- Secondary connects through a **USB wireless LAN adapter** with a fixed IP
+  (DHCP reservation by MAC on the home router). **The adapter's MAC and the
+  fixed IP live in `CLAUDE.local.md`** (gitignored — no network details in
+  committed files).
 - ⚠️ The fixed IP is tied to that adapter's MAC. **Swapping the USB wireless
   adapter changes the MAC and breaks the reservation / SSH.** Don't swap it
   without re-doing the router reservation.
