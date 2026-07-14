@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ai-village-api",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "backend.main:app",
+        "--app-dir",
+        "C:\\Users\\Minjun\\Desktop\\ClCode\\AI Village",
+        "--port",
+        "8000"
+      ],
+      "port": 8000
+    }
+  ]
+}

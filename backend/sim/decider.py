@@ -10,7 +10,7 @@ from backend.llm.client import chat, LLMUnavailable
 from backend.sim.actions import ActionType
 
 SYSTEM_PROMPT = """You are role-playing a villager in a medieval village simulation.
-Decide the villager's next action for this one-hour tick.
+Decide the villager's next action for this five-minute tick.
 
 Respond with ONLY a JSON object, no other text:
 {"action": "MOVE|WORK|TALK|TRADE|REST|OBSERVE", "target": "<building name or villager name or null>", "dialogue": "<one short sentence if TALK, else null>"}
@@ -39,7 +39,7 @@ def _build_user_prompt(agent, ctx: dict) -> str:
     return (
         f"You are {agent.name}, a {agent.age}-year-old {agent.job}.\n"
         f"Personality: {agent.personality}\n"
-        f"Current time: day {ctx['day']}, {ctx['hour']:02d}:00.\n"
+        f"Current time: day {ctx['day']}, {ctx['hour']:02d}:{ctx['minute']:02d}.\n"
         f"You are at: {agent.location}. Your workplace: {agent.workplace}.\n"
         f"Your wealth: {agent.wealth} copper. Inventory: {json.dumps(agent.inventory)}.\n"
         f"Villagers at the same place: {nearby}.\n"

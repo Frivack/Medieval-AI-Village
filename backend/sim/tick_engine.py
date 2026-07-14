@@ -2,7 +2,7 @@
 # Advances the world by one tick (= one in-game hour).
 # Per agent: continue an in-progress move (1 tile per tick), otherwise
 # ask the decider for a new action and execute it.
-from backend.config import HOURS_PER_DAY
+from backend.config import TICKS_PER_DAY, TICKS_PER_HOUR, MINUTES_PER_TICK
 from backend.database import SessionLocal, AgentState, TickHistory, SimState
 from backend.sim.actions import ActionType, JOB_PRODUCT
 from backend.sim.decider import decide
@@ -11,7 +11,13 @@ from backend.world.pathfinding import find_path
 
 
 def game_time(tick: int) -> dict:
-    return {"tick": tick, "day": tick // HOURS_PER_DAY + 1, "hour": tick % HOURS_PER_DAY}
+    day_tick = tick % TICKS_PER_DAY
+    return {
+        "tick": tick,
+        "day": tick // TICKS_PER_DAY + 1,
+        "hour": day_tick // TICKS_PER_HOUR,
+        "minute": (day_tick % TICKS_PER_HOUR) * MINUTES_PER_TICK,
+    }
 
 
 def run_tick() -> dict:
@@ -48,7 +54,13 @@ def _step_agent(db, agent, all_agents, time: dict) -> dict:
     if agent.path:
         return _advance_along_path(agent)
 
-    # 2) Idle → decide a new action.
+    # 2) Asleep at night → stay asleep, no re-decision (and no LLM call)
+    #    every 5 minutes. Agents wake up at 06:00.
+    if agent.status == "resting" and (time["hour"] >= 22 or time["hour"] < 6):
+        return {"action": ActionType.REST.value,
+                "detail": f"sleeping at {agent.location}"}
+
+    # 3) Idle → decide a new action.
     ctx = _world_context(agent, all_agents, time)
     decision = decide(agent, ctx)
     action = decision["action"]
@@ -56,7 +68,7 @@ def _step_agent(db, agent, all_agents, time: dict) -> dict:
     if action == ActionType.MOVE:
         return _start_move(agent, decision.get("target"))
     if action == ActionType.WORK:
-        return _do_work(agent)
+        return _do_work(agent, time)
     if action == ActionType.TALK:
         return _do_talk(agent, all_agents, decision)
     if action == ActionType.REST:
@@ -110,11 +122,13 @@ def _start_move(agent, target) -> dict:
     return _advance_along_path(agent)  # first step happens this tick
 
 
-def _do_work(agent) -> dict:
+def _do_work(agent, time: dict) -> dict:
     agent.status = "working"
     agent.talking_to = None
     product = JOB_PRODUCT.get(agent.job)
-    if product:
+    # Output rate is 1 item per in-game hour, not per tick: only the
+    # on-the-hour tick (minute == 0) yields the finished product.
+    if product and time["minute"] == 0:
         inventory = dict(agent.inventory or {})
         inventory[product] = inventory.get(product, 0) + 1
         agent.inventory = inventory

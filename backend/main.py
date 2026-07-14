@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from backend.config import TICKS_PER_DAY
 from backend.database import init_db, get_db, AgentState, TickHistory, SimState
 from backend.agents.loader import load_agents_from_json
 from backend.sim.tick_engine import run_tick, game_time
@@ -42,8 +43,8 @@ def get_villagers():
 
 @app.post("/tick")
 def advance_tick(count: int = 1):
-    """Advance the simulation by `count` ticks (1 tick = 1 in-game hour)."""
-    count = max(1, min(count, 24))  # cap: at most one full day per request
+    """Advance the simulation by `count` ticks (1 tick = 5 in-game minutes)."""
+    count = max(1, min(count, TICKS_PER_DAY))  # cap: one full day per request
     return [run_tick() for _ in range(count)]
 
 

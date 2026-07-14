@@ -18,4 +18,10 @@ LLM_READ_TIMEOUT = float(os.getenv("LLM_READ_TIMEOUT", "30.0"))
 # World
 MAP_WIDTH = 100
 MAP_HEIGHT = 50
-HOURS_PER_DAY = 24  # 1 tick = 1 in-game hour
+
+# Time: 1 tick = 5 in-game minutes.
+# (1 tick = 1 hour made travel absurd: crossing the village at
+# 1 tile/tick took two in-game days. At 5 min/tick it's ~4 hours.)
+MINUTES_PER_TICK = 5
+TICKS_PER_HOUR = 60 // MINUTES_PER_TICK   # 12
+TICKS_PER_DAY = TICKS_PER_HOUR * 24       # 288

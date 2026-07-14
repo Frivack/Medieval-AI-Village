@@ -63,9 +63,13 @@ entry per agent, includes `workplace`):
 - **Structured actions:** `MOVE`, `WORK`, `TALK`, `REST`, `OBSERVE` executed
   in `backend/sim/tick_engine.py`. `TRADE` is declared but not implemented
   yet (falls back to OBSERVE).
-- **Time:** 1 tick = 1 in-game hour; day/hour derived from `SimState.tick`.
-  `POST /tick?count=N` advances up to 24 ticks per call; `GET /time`,
-  `GET /history` for inspection.
+- **Time:** **1 tick = 5 in-game minutes** (12 ticks/hour, 288/day);
+  day/hour/minute derived from `SimState.tick`. Chosen because 1 tick =
+  1 hour made 1-tile-per-tick travel absurdly slow (two days to cross
+  the village). WORK yields its product once per in-game hour (on the
+  minute-0 tick); sleeping agents skip re-decisions until 06:00 to save
+  LLM calls. `POST /tick?count=N` advances up to one day per call;
+  `GET /time`, `GET /history` for inspection.
 
 ### LLM integration
 - `backend/llm/client.py` — OpenAI-compatible `/chat/completions` via httpx.
@@ -142,7 +146,7 @@ Backend world + movement first; frontend after.
 3. **Structured action types** — mostly done: `MOVE`, `WORK`, `TALK`, `REST`,
    `OBSERVE` work; **`TRADE` still needs a real implementation** (price
    negotiation, inventory/copper exchange between agents).
-4. ~~**Time system**~~ ✅ done — 1 tick = 1 in-game hour (`SimState.tick`).
+4. ~~**Time system**~~ ✅ done — 1 tick = 5 in-game minutes (`SimState.tick`).
 5. **Agent memory** — write observations/conversations into
    `short_term_memory`, then ChromaDB retrieval (Generative Agents style).
 6. **Frontend** (queued after the above)
