@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from backend.database import SessionLocal, AgentState
+from backend.world.map import village_map
 
 
 def load_agents_from_json():
@@ -16,6 +17,9 @@ def load_agents_from_json():
         data = json.load(f)
 
     for agent in data["agents"]:
+        # Spawn inside the building named by initial_location.
+        building = village_map.buildings[agent["initial_location"]]
+        x, y = building.interior
         db_agent = AgentState(
             id=agent["id"],
             name=agent["name"],
@@ -24,6 +28,10 @@ def load_agents_from_json():
             personality=agent["personality"],
             wealth=agent["initial_wealth"],
             location=agent["initial_location"],
+            workplace=agent["workplace"],
+            x=x,
+            y=y,
+            path=[],
             inventory=agent["initial_inventory"]
         )
         db.add(db_agent)

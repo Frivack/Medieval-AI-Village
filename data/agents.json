@@ -6,12 +6,13 @@
       "age": 42,
       "job": "Farmer",
       "personality": "Hardworking and simple-hearted. Deeply sensitive to weather and harvests. Despises debt and always pays what he owes.",
-     "initial_wealth": 3000,
+      "initial_wealth": 3000,
       "initial_location": "Farm",
       "initial_inventory": {
         "wheat": 10,
         "vegetables": 5
-      }
+      },
+      "workplace": "Farm"
     },
     {
       "id": "agent_002",
@@ -24,7 +25,8 @@
       "initial_inventory": {
         "farming_tools": 3,
         "sword": 2
-      }
+      },
+      "workplace": "Smithy"
     },
     {
       "id": "agent_003",
@@ -37,7 +39,8 @@
       "initial_inventory": {
         "wheat": 5,
         "farming_tools": 1
-      }
+      },
+      "workplace": "Market"
     },
     {
       "id": "agent_004",
@@ -50,7 +53,8 @@
       "initial_inventory": {
         "food": 20,
         "ale": 10
-      }
+      },
+      "workplace": "Inn"
     }
   ]
 }

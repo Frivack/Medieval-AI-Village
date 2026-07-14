@@ -17,6 +17,10 @@ class AgentState(Base):
     personality = Column(String)
     wealth = Column(Integer, default=0)
     location = Column(String)
+    workplace = Column(String)
+    x = Column(Integer, default=0)
+    y = Column(Integer, default=0)
+    path = Column(JSON, default=list)  # remaining A* steps: [[x, y], ...]
     status = Column(String, default="idle")
     inventory = Column(JSON)
     daily_plan = Column(JSON, default=list)
@@ -35,6 +39,17 @@ class TickHistory(Base):
     dialogue = Column(String)
     gold_change = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.now)
+
+
+class SimState(Base):
+    """World-level state. Single row (id=1) holding the tick counter.
+
+    1 tick = 1 in-game hour; day/hour are derived from tick, not stored.
+    """
+    __tablename__ = "sim_state"
+
+    id = Column(Integer, primary_key=True, default=1)
+    tick = Column(Integer, default=0)
 
 
 BASE_DIR = Path(__file__).parent.parent  # backend/ → Medieval-AI-Village/

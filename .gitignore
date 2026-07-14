@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Runtime state — regenerated from data/agents.json on startup
+data/village.db
