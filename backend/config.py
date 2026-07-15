@@ -5,6 +5,7 @@
 #   - Secondary machine (1080 Ti): http://<its-LAN-IP>:8000/v1 (IP in CLAUDE.local.md)
 #   - Groq (deployment):           https://api.groq.com/openai/v1
 import os
+from pathlib import Path
 
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "llama3.1-8b")
@@ -18,6 +19,14 @@ LLM_READ_TIMEOUT = float(os.getenv("LLM_READ_TIMEOUT", "30.0"))
 # World
 MAP_WIDTH = 100
 MAP_HEIGHT = 50
+
+# Memory
+# VECTOR_MEMORY=0 disables ChromaDB even if installed; when chromadb
+# isn't installed at all it degrades to short-term memory automatically.
+VECTOR_MEMORY = os.getenv("VECTOR_MEMORY", "1").lower() not in ("0", "false", "off")
+CHROMA_DIR = Path(__file__).parent.parent / "data" / "chroma"
+SHORT_TERM_MEMORY_LIMIT = 50   # newest N entries kept on the agent row
+MEMORIES_IN_PROMPT = 8         # recent memories shown to the LLM
 
 # Time: 1 tick = 5 in-game minutes.
 # (1 tick = 1 hour made travel absurd: crossing the village at

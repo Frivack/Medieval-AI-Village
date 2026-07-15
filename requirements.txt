@@ -2,3 +2,8 @@ fastapi
 uvicorn
 sqlalchemy
 httpx
+
+# Optional, dev PC only (too heavy for the 1 GB deployment box):
+# enables long-term agent memory retrieval; the sim degrades
+# gracefully to short-term memory without it. See backend/memory/.
+# chromadb

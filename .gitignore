@@ -227,6 +227,7 @@ frontend/node_modules/
 # Runtime state — regenerated from data/agents.json on startup
 data/village.db
 data/village.db-journal
+data/chroma/
 
 # Local-only notes with infrastructure details — never commit
 CLAUDE.local.md

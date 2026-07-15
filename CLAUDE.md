@@ -92,10 +92,26 @@ entry per agent, includes `workplace`):
   This rate was chosen to balance historical plausibility against
   computational simplicity (the ratio was researched before it was committed).
 
-### Memory / retrieval
-- **ChromaDB is NOT integrated yet.** It remains the intended vector store
-  for agent memory retrieval (Generative Agents approach); `short_term_memory`
-  exists as a JSON column on `AgentState` but nothing writes to it yet.
+### Memory / retrieval (live since 2026-07-16)
+- **Short-term memory:** every notable event is written to
+  `AgentState.short_term_memory` (ring buffer, newest 50) by
+  `_remember()` in the tick engine — arrivals, TALK dialogue (both
+  sides, importance 2), TRADE settlements (both sides, importance 3),
+  hourly WORK output (importance 1).
+- **Prompt selection** (`_memory_lines` in `backend/sim/decider.py`):
+  top-8 by `importance × 72 ticks − age`, duplicates collapsed, shown
+  chronologically. Recency alone drowned a trade under one evening of
+  repeated greetings — that's why importance exists.
+- **ChromaDB long-term store is OPTIONAL** (`backend/memory/store.py`):
+  install `chromadb` on the dev PC only — far too heavy for the 1 GB
+  deployment box, which degrades gracefully to a null store. When
+  active it persists all memories to `data/chroma/` (gitignored) and
+  appends top-3 semantically relevant older memories to the prompt.
+  Kill switch: `VECTOR_MEMORY=0`. First use downloads the MiniLM ONNX
+  embedding model (~80 MB) to `~/.cache/chroma/`.
+- In-game clock helpers live in `backend/sim/clock.py` (not
+  tick_engine) so decider can format memory timestamps without a
+  circular import.
 
 ---
 
@@ -141,9 +157,9 @@ entry per agent, includes `workplace`):
 
 ### Deployment — LIVE (since 2026-07-14)
 - Deployed on an **Oracle Cloud instance** (Ubuntu 22.04 x86_64, 1 GB RAM),
-  running via `nohup` (**not boot-persistent** — it dies on reboot;
-  registering a systemd service was deliberately deferred by the developer
-  on 2026-07-15, ask before setting it up).
+  running as a **systemd service `ai-village`** (registered 2026-07-16:
+  enabled at boot, `Restart=on-failure`, logs append to `~/ai-village.log`).
+  Deploy = `git pull` + `sudo systemctl restart ai-village`.
 - No LLM on that box → the simulation runs on the rule-based fallback.
   For real LLM behavior set `LLM_BASE_URL` (e.g. Groq) in the environment.
 - **Addresses, SSH access, ports and the restart procedure live in
@@ -171,10 +187,12 @@ Backend world + movement first; frontend after.
    Prod: **`frontend/dist` is committed** and FastAPI serves it at `/`
    via StaticFiles (mounted last, API routes win; old `/` status JSON
    moved to `/health`) — the 1 GB deployment box needs no Node.js.
-6. **Agent memory** — write observations/conversations into
-   `short_term_memory`, then ChromaDB retrieval (Generative Agents style).
-7. **Frontend polish** — villager selection/detail view, day/night tint,
-   smoother movement animation, mobile layout.
+6. ~~**Agent memory**~~ ✅ done (2026-07-16) — observations/conversations
+   → `short_term_memory` with importance-weighted prompt selection;
+   ChromaDB retrieval as an optional layer (see §3 Memory).
+7. **Frontend polish** — villager selection/detail view (surface
+   `recent_memories` from `/villagers`), day/night tint, smoother
+   movement animation, mobile layout.
 
 ---
 
@@ -194,9 +212,8 @@ Backend world + movement first; frontend after.
 - **Driving `ssh` from Windows PowerShell mangles quotes**: inner double
   quotes in the remote command get stripped by PowerShell 5.1 argument
   parsing. Prefer remote commands that need no nested quoting.
-- The deployment box has a **pending kernel upgrade** — it will want a
-  reboot at some point; remember the app doesn't auto-start (see §5 and
-  `CLAUDE.local.md`).
+- The deployment box has a **pending kernel upgrade** — rebooting is safe
+  now that the app is a systemd service (auto-starts since 2026-07-16).
 - **On the Windows dev PC, ticks are slow when LM Studio is off**: the
   firewall silently drops connects to the closed port 1234, so every LLM
   attempt burns the full `LLM_CONNECT_TIMEOUT` (2 s) instead of failing

@@ -2,9 +2,11 @@
 # Advances the world by one tick (= 5 in-game minutes).
 # Per agent: continue an in-progress move (1 tile per tick), otherwise
 # ask the decider for a new action and execute it.
-from backend.config import TICKS_PER_DAY, TICKS_PER_HOUR, MINUTES_PER_TICK
+from backend.config import SHORT_TERM_MEMORY_LIMIT
 from backend.database import SessionLocal, AgentState, TickHistory, SimState
+from backend.memory.store import memory_store
 from backend.sim.actions import ActionType, JOB_PRODUCT
+from backend.sim.clock import game_time  # re-exported for main.py
 from backend.sim.decider import decide
 from backend.sim.prices import price_of
 from backend.utils.currency import to_string
@@ -12,14 +14,19 @@ from backend.world.map import village_map
 from backend.world.pathfinding import find_path
 
 
-def game_time(tick: int) -> dict:
-    day_tick = tick % TICKS_PER_DAY
-    return {
-        "tick": tick,
-        "day": tick // TICKS_PER_DAY + 1,
-        "hour": day_tick // TICKS_PER_HOUR,
-        "minute": (day_tick % TICKS_PER_HOUR) * MINUTES_PER_TICK,
-    }
+def _remember(agent, tick: int, text: str, importance: int = 1) -> None:
+    """Append one observation to the agent's short-term memory (ring
+    buffer on the DB row) and to the optional long-term vector store.
+
+    importance (1-3) feeds prompt selection: without it, one evening of
+    small talk pushes a day-old trade out of the prompt window (recency
+    alone drowns rare-but-important events in frequent chatter).
+    """
+    memories = list(agent.short_term_memory or [])
+    memories.append({"tick": tick, "text": text, "importance": importance})
+    # Reassign so SQLAlchemy notices the JSON change (same as agent.path).
+    agent.short_term_memory = memories[-SHORT_TERM_MEMORY_LIMIT:]
+    memory_store.add(agent.id, tick, text)
 
 
 def run_tick() -> dict:
@@ -65,7 +72,7 @@ def run_tick() -> dict:
 def _step_agent(db, agent, all_agents, time: dict) -> dict:
     # 1) Already walking somewhere → take the next step (1 tile per tick).
     if agent.path:
-        return _advance_along_path(agent)
+        return _advance_along_path(agent, time["tick"])
 
     # 2) Asleep at night → stay asleep, no re-decision (and no LLM call)
     #    every 5 minutes. Agents wake up at 06:00.
@@ -79,13 +86,13 @@ def _step_agent(db, agent, all_agents, time: dict) -> dict:
     action = decision["action"]
 
     if action == ActionType.MOVE:
-        return _start_move(agent, decision.get("target"))
+        return _start_move(agent, decision.get("target"), time["tick"])
     if action == ActionType.WORK:
         return _do_work(agent, time)
     if action == ActionType.TALK:
-        return _do_talk(agent, all_agents, decision)
+        return _do_talk(agent, all_agents, decision, time["tick"])
     if action == ActionType.TRADE:
-        return _do_trade(agent, all_agents, decision)
+        return _do_trade(agent, all_agents, decision, time["tick"])
     if action == ActionType.REST:
         agent.status = "resting"
         agent.talking_to = None
@@ -105,7 +112,7 @@ def _world_context(agent, all_agents, time: dict) -> dict:
     }
 
 
-def _advance_along_path(agent) -> dict:
+def _advance_along_path(agent, tick: int) -> dict:
     path = list(agent.path)
     agent.x, agent.y = path.pop(0)
     agent.path = path  # reassign so SQLAlchemy notices the JSON change
@@ -115,13 +122,14 @@ def _advance_along_path(agent) -> dict:
         building = village_map.building_at(agent.x, agent.y)
         agent.location = building.name if building else "Outdoors"
         agent.status = "idle"
+        _remember(agent, tick, f"I arrived at {agent.location}.")
         return {"action": ActionType.MOVE.value,
                 "detail": f"arrived at {agent.location}"}
     return {"action": ActionType.MOVE.value,
             "detail": f"walking, {len(path)} tiles to go"}
 
 
-def _start_move(agent, target) -> dict:
+def _start_move(agent, target, tick: int) -> dict:
     building = village_map.buildings.get(target)
     if building is None:
         return {"action": ActionType.OBSERVE.value,
@@ -133,7 +141,7 @@ def _start_move(agent, target) -> dict:
     agent.path = path
     agent.location = "Outdoors"
     agent.talking_to = None
-    return _advance_along_path(agent)  # first step happens this tick
+    return _advance_along_path(agent, tick)  # first step happens this tick
 
 
 def _do_work(agent, time: dict) -> dict:
@@ -146,13 +154,14 @@ def _do_work(agent, time: dict) -> dict:
         inventory = dict(agent.inventory or {})
         inventory[product] = inventory.get(product, 0) + 1
         agent.inventory = inventory
+        _remember(agent, time["tick"], f"I produced 1 {product} at {agent.location}.")
         return {"action": ActionType.WORK.value,
                 "detail": f"produced 1 {product} at {agent.location}"}
     return {"action": ActionType.WORK.value,
             "detail": f"working at {agent.location}"}
 
 
-def _do_trade(agent, all_agents, decision: dict) -> dict:
+def _do_trade(agent, all_agents, decision: dict, tick: int) -> dict:
     """Buyer-initiated trade: `agent` buys item x quantity from `target`.
 
     Settles atomically at the base price — validates partner presence,
@@ -196,6 +205,12 @@ def _do_trade(agent, all_agents, decision: dict) -> dict:
 
     agent.status = "trading"
     agent.talking_to = None
+    _remember(agent, tick,
+              f"I bought {quantity} {item} from {seller.name} for {to_string(total)}.",
+              importance=3)
+    _remember(seller, tick,
+              f"I sold {quantity} {item} to {agent.name} for {to_string(total)}.",
+              importance=3)
     return {
         "action": ActionType.TRADE.value,
         "detail": f"bought {quantity} {item} from {seller.name} for {to_string(total)}",
@@ -204,7 +219,7 @@ def _do_trade(agent, all_agents, decision: dict) -> dict:
     }
 
 
-def _do_talk(agent, all_agents, decision: dict) -> dict:
+def _do_talk(agent, all_agents, decision: dict, tick: int) -> dict:
     target_name = decision.get("target")
     partner = next((a for a in all_agents
                     if a.name == target_name and a.location == agent.location), None)
@@ -215,5 +230,9 @@ def _do_talk(agent, all_agents, decision: dict) -> dict:
     agent.status = "talking"
     agent.talking_to = partner.id
     dialogue = decision.get("dialogue") or "..."
+    # Both sides remember the exchange — that's what makes later
+    # conversations (and eventually retrieval) feel coherent.
+    _remember(agent, tick, f'I said to {partner.name}: "{dialogue}"', importance=2)
+    _remember(partner, tick, f'{agent.name} said to me: "{dialogue}"', importance=2)
     return {"action": ActionType.TALK.value, "dialogue": dialogue,
             "detail": f"talking to {partner.name}"}

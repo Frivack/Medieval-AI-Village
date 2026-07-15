@@ -42,6 +42,7 @@ def get_villagers(db: Session = Depends(get_db)):
             "wealth": a.wealth, "location": a.location,
             "x": a.x, "y": a.y, "status": a.status,
             "inventory": a.inventory,
+            "recent_memories": (a.short_term_memory or [])[-5:],
         }
         for a in agents
     ]
