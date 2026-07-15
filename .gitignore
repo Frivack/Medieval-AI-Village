@@ -217,6 +217,13 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Frontend — note: frontend/dist IS committed on purpose, so the
+# deployment box can serve the UI without Node.js (git pull + restart).
+# The two ! lines override the Python template's global "dist/" above.
+frontend/node_modules/
+!frontend/dist/
+!frontend/dist/**
+
 # Runtime state — regenerated from data/agents.json on startup
 data/village.db
 data/village.db-journal

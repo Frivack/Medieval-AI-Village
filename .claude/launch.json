@@ -14,6 +14,19 @@
         "8000"
       ],
       "port": 8000
+    },
+    {
+      "name": "ai-village-frontend",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "npm",
+        "run",
+        "dev",
+        "--prefix",
+        "C:\\Users\\Minjun\\Desktop\\ClCode\\AI Village\\frontend"
+      ],
+      "port": 5173
     }
   ]
 }

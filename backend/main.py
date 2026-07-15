@@ -1,7 +1,10 @@
 # backend/main.py
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 
 from backend.config import TICKS_PER_DAY
 from backend.database import init_db, get_db, AgentState, TickHistory, SimState
@@ -21,14 +24,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/")
-def root():
+@app.get("/health")
+def health():
     return {"status": "Medieval AI Village running"}
 
 
 @app.get("/villagers")
-def get_villagers():
-    db = next(get_db())
+def get_villagers(db: Session = Depends(get_db)):
+    # Depends() runs the get_db generator to completion after the
+    # response, so the session is actually closed. Calling next(get_db())
+    # by hand leaks the session — under frontend polling that exhausts
+    # the connection pool (QueuePool limit reached -> HTTP 500).
     agents = db.query(AgentState).all()
     return [
         {
@@ -49,8 +55,7 @@ def advance_tick(count: int = 1):
 
 
 @app.get("/time")
-def get_time():
-    db = next(get_db())
+def get_time(db: Session = Depends(get_db)):
     sim = db.get(SimState, 1)
     return game_time(sim.tick if sim else 0)
 
@@ -61,8 +66,8 @@ def get_map():
 
 
 @app.get("/history")
-def get_history(limit: int = 50):
-    db = next(get_db())
+def get_history(limit: int = 50, db: Session = Depends(get_db)):
+    """Recent events, newest first. copper_change is +/- copper for TRADE rows."""
     rows = (db.query(TickHistory)
               .order_by(TickHistory.id.desc())
               .limit(limit).all())
@@ -72,3 +77,12 @@ def get_history(limit: int = 50):
          "copper_change": r.gold_change}
         for r in rows
     ]
+
+
+# Serve the built frontend (frontend/dist) at "/". Mounted last so the
+# API routes above always win; html=True makes "/" serve index.html.
+# The dist build is committed to the repo so the deployment box needs
+# no Node.js — `git pull` + restart is the whole frontend deploy.
+FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+if FRONTEND_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

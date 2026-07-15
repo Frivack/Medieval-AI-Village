@@ -163,11 +163,18 @@ Backend world + movement first; frontend after.
    settles at fixed base prices (LLM **price negotiation** deferred to a
    v2 layered on the same settlement core in `_do_trade`).
 4. ~~**Time system**~~ ✅ done — 1 tick = 5 in-game minutes (`SimState.tick`).
-5. **Agent memory** — write observations/conversations into
+5. ~~**Frontend v1**~~ ✅ done (2026-07-15, pulled ahead of memory for
+   portfolio visibility) — React + Vite in `frontend/`: canvas map
+   renderer, villager cards, filtered event log (TALK dialogue + TRADE
+   copper flows), tick controls with auto-run. Dev: vite on :5173
+   proxies API paths to :8000 (`.claude/launch.json` has both servers).
+   Prod: **`frontend/dist` is committed** and FastAPI serves it at `/`
+   via StaticFiles (mounted last, API routes win; old `/` status JSON
+   moved to `/health`) — the 1 GB deployment box needs no Node.js.
+6. **Agent memory** — write observations/conversations into
    `short_term_memory`, then ChromaDB retrieval (Generative Agents style).
-6. **Frontend** (queued after the above)
-   - **React + Vite**, web visualization of the village (`GET /map` +
-     `GET /villagers` already return everything a renderer needs).
+7. **Frontend polish** — villager selection/detail view, day/night tint,
+   smoother movement animation, mobile layout.
 
 ---
 
@@ -190,6 +197,15 @@ Backend world + movement first; frontend after.
 - The deployment box has a **pending kernel upgrade** — it will want a
   reboot at some point; remember the app doesn't auto-start (see §5 and
   `CLAUDE.local.md`).
+- **On the Windows dev PC, ticks are slow when LM Studio is off**: the
+  firewall silently drops connects to the closed port 1234, so every LLM
+  attempt burns the full `LLM_CONNECT_TIMEOUT` (2 s) instead of failing
+  instantly. Set `LLM_CONNECT_TIMEOUT=0.2` (or start LM Studio) for
+  snappy local dev. On Linux the connect is refused immediately.
+- **Always get DB sessions via `Depends(get_db)` in FastAPI routes.**
+  Hand-calling `next(get_db())` skips the generator's `finally`, leaks
+  the session, and under frontend polling exhausts the connection pool
+  (`QueuePool limit reached` → HTTP 500). Bitten once already.
 
 ---
 
