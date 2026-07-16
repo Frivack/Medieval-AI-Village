@@ -18,10 +18,13 @@ export default function HistoryFeed({ history, nameById }) {
             <span className="ev-time">{tickToClock(r.tick)}</span>
             <span className="ev-agent">{nameById[r.agent_id] ?? r.agent_id}</span>
             {r.action === "TRADE" ? (
-              <span className={r.copper_change >= 0 ? "gain" : "spend"}>
-                {r.copper_change >= 0 ? "earned" : "spent"}{" "}
-                {formatCopper(Math.abs(r.copper_change))}
-              </span>
+              <>
+                <span className={r.copper_change >= 0 ? "gain" : "spend"}>
+                  {r.copper_change >= 0 ? "earned" : "spent"}{" "}
+                  {formatCopper(Math.abs(r.copper_change))}
+                </span>
+                {r.dialogue && <span className="ev-dialogue">{r.dialogue}</span>}
+              </>
             ) : r.dialogue ? (
               <span className="ev-dialogue">“{r.dialogue}”</span>
             ) : (

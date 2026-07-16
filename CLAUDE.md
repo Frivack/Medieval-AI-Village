@@ -68,8 +68,16 @@ entry per agent, includes `workplace`):
   seller stock and buyer funds, then settles items + copper atomically and
   records both sides in `TickHistory` (`gold_change` column, value in
   copper). The rule-based fallback buys a meal from the innkeeper on
-  minute-0 evening ticks at the Inn. LLM price negotiation is planned as
-  v2 on top of the same settlement core.
+  minute-0 evening ticks at the Inn.
+- **TRADE v2 negotiation** (`backend/sim/negotiation.py`, since
+  2026-07-16): single-tick, max two LLM calls — seller reacts to the
+  base-price offer (accept/counter/refuse, personality + memories about
+  this buyer/item in the prompt), buyer reacts to a counter. Counters
+  are clamped to 70–130% of base so a hallucinating model can't wreck
+  the economy; any LLM failure resolves to accepting the base price
+  (= v1), so the rule-based fallback is unaffected. Negotiation lines
+  land in `TickHistory.dialogue` and show in the frontend log;
+  refusals become OBSERVE + an importance-2 memory on both sides.
 - **Time:** **1 tick = 5 in-game minutes** (12 ticks/hour, 288/day);
   day/hour/minute derived from `SimState.tick`. Chosen because 1 tick =
   1 hour made 1-tile-per-tick travel absurdly slow (two days to cross
@@ -175,9 +183,9 @@ Backend world + movement first; frontend after.
 1. ~~**Tile-based open-world map**~~ ✅ done — 100×50 grid, walkable/resource
    tiles, building interiors (`backend/world/`).
 2. ~~**A\* pathfinding**~~ ✅ done — agents move 1 tile per tick.
-3. ~~**Structured action types**~~ ✅ done — all six actions work; TRADE v1
-   settles at fixed base prices (LLM **price negotiation** deferred to a
-   v2 layered on the same settlement core in `_do_trade`).
+3. ~~**Structured action types**~~ ✅ done — all six actions work; TRADE
+   settles via the v1 core, with **v2 LLM price negotiation** layered on
+   top since 2026-07-16 (see §3).
 4. ~~**Time system**~~ ✅ done — 1 tick = 5 in-game minutes (`SimState.tick`).
 5. ~~**Frontend v1**~~ ✅ done (2026-07-15, pulled ahead of memory for
    portfolio visibility) — React + Vite in `frontend/`: canvas map

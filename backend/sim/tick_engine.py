@@ -8,6 +8,7 @@ from backend.memory.store import memory_store
 from backend.sim.actions import ActionType, JOB_PRODUCT
 from backend.sim.clock import game_time  # re-exported for main.py
 from backend.sim.decider import decide
+from backend.sim.negotiation import negotiate
 from backend.sim.prices import price_of
 from backend.utils.currency import to_string
 from backend.world.map import village_map
@@ -164,9 +165,11 @@ def _do_work(agent, time: dict) -> dict:
 def _do_trade(agent, all_agents, decision: dict, tick: int) -> dict:
     """Buyer-initiated trade: `agent` buys item x quantity from `target`.
 
-    Settles atomically at the base price — validates partner presence,
-    seller stock and buyer funds, then moves items and copper both ways.
-    Any failed precondition degrades to OBSERVE, like _do_talk/_start_move.
+    v2: the price comes out of a single-tick negotiation (negotiation.py)
+    seeded with the base price; without an LLM that resolves to the base
+    price, i.e. v1. The settlement itself is unchanged: validate, then
+    move items and copper both ways atomically. Any failed precondition
+    degrades to OBSERVE, like _do_talk/_start_move.
     """
     target_name = decision.get("target")
     item = decision.get("item")
@@ -179,18 +182,38 @@ def _do_trade(agent, all_agents, decision: dict, tick: int) -> dict:
                    if a.name == target_name and a.location == agent.location
                    and a.id != agent.id), None)
     fail = None
+    base_total = None
     if seller is None:
         fail = f"wanted to buy from {target_name}, but they're not here"
-    elif (total := price_of(item, quantity)) is None:
+    elif (base_total := price_of(item, quantity)) is None:
         fail = f"wanted to buy unknown item '{item}'"
     elif (seller.inventory or {}).get(item, 0) < quantity:
         fail = f"{seller.name} has no {item} to sell"
-    elif agent.wealth < total:
-        fail = f"can't afford {quantity} {item} ({to_string(total)})"
     if fail:
         agent.status = "observing"
         agent.talking_to = None
         return {"action": ActionType.OBSERVE.value, "detail": fail}
+
+    deal = negotiate(agent, seller, item, quantity, base_total)
+    dialogue = " / ".join(deal["dialogue"]) or None
+    if deal["outcome"] == "refuse":
+        _remember(agent, tick,
+                  f"{seller.name} refused to sell me {quantity} {item}.", importance=2)
+        _remember(seller, tick,
+                  f"I refused to sell {quantity} {item} to {agent.name}.", importance=2)
+        agent.status = "observing"
+        agent.talking_to = None
+        return {"action": ActionType.OBSERVE.value, "dialogue": dialogue,
+                "detail": f"{seller.name} refused to sell {item}"}
+
+    # The buyer's funds are checked against the NEGOTIATED price, not the
+    # base price — a counter-offer can push the total above their purse.
+    total = deal["price"]
+    if agent.wealth < total:
+        agent.status = "observing"
+        agent.talking_to = None
+        return {"action": ActionType.OBSERVE.value, "dialogue": dialogue,
+                "detail": f"can't afford {quantity} {item} ({to_string(total)})"}
 
     buyer_inv = dict(agent.inventory or {})
     buyer_inv[item] = buyer_inv.get(item, 0) + quantity
@@ -213,6 +236,7 @@ def _do_trade(agent, all_agents, decision: dict, tick: int) -> dict:
               importance=3)
     return {
         "action": ActionType.TRADE.value,
+        "dialogue": dialogue,
         "detail": f"bought {quantity} {item} from {seller.name} for {to_string(total)}",
         "copper_change": -total,
         "seller_side": {"agent_id": seller.id, "copper_change": total},
