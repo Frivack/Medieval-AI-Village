@@ -99,16 +99,24 @@ def _parse_decision(raw: str):
         return None
     try:
         data = json.loads(match.group())
-        action = ActionType(data["action"].upper())
+        # str(): a model answering "action": null must fall back, not crash the tick.
+        action = ActionType(str(data["action"]).upper())
     except (json.JSONDecodeError, KeyError, ValueError):
         return None
     return {
         "action": action,
-        "target": data.get("target"),
-        "dialogue": data.get("dialogue"),
-        "item": data.get("item"),
-        "quantity": data.get("quantity"),
+        "target": _text(data.get("target")),
+        "dialogue": _text(data.get("dialogue")),
+        "item": _text(data.get("item")),
+        "quantity": data.get("quantity"),  # validated in tick_engine._do_trade
     }
+
+
+def _text(value):
+    """Model output is untrusted: keep strings, drop anything else. A list
+    as `target` would crash the building lookup, a dict as `dialogue` the
+    history insert — and either one aborts the whole tick for everyone."""
+    return value if isinstance(value, str) else None
 
 
 def _rule_based(agent, ctx: dict) -> dict:

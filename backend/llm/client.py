@@ -32,6 +32,11 @@ def chat(system_prompt: str, user_prompt: str, temperature: float = 0.7) -> str:
             timeout=timeout,
         )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
-    except (httpx.HTTPError, KeyError, IndexError) as exc:
+        content = response.json()["choices"][0]["message"]["content"]
+    # ValueError: a non-JSON body (proxy error page); TypeError: JSON of
+    # the wrong shape. Either way there's no answer — use the fallback.
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
         raise LLMUnavailable(str(exc)) from exc
+    if not isinstance(content, str):  # e.g. null content from some providers
+        raise LLMUnavailable(f"no text in LLM response: {content!r}")
+    return content
