@@ -3,13 +3,13 @@
   "configurations": [
     {
       "name": "ai-village-api",
-      "runtimeExecutable": "python",
+      "runtimeExecutable": "C:\\Users\\Minjun\\anaconda3\\envs\\ai-village\\python.exe",
       "runtimeArgs": [
         "-m",
         "uvicorn",
         "backend.main:app",
         "--app-dir",
-        "C:\\Users\\Minjun\\Desktop\\ClCode\\AI Village",
+        "S:\\ClCode\\AI Village",
         "--port",
         "8000"
       ],
@@ -24,7 +24,7 @@
         "run",
         "dev",
         "--prefix",
-        "C:\\Users\\Minjun\\Desktop\\ClCode\\AI Village\\frontend"
+        "S:\\ClCode\\AI Village\\frontend"
       ],
       "port": 5173
     }
