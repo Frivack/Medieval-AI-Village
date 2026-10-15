@@ -12,6 +12,7 @@ export const fetchMap = () => getJSON("/map");
 export const fetchVillagers = () => getJSON("/villagers");
 export const fetchTime = () => getJSON("/time");
 export const fetchHistory = (limit = 40) => getJSON(`/history?limit=${limit}`);
+export const fetchStatus = () => getJSON("/status");
 
 export async function advanceTicks(count = 1) {
   const res = await fetch(`/tick?count=${count}`, { method: "POST" });

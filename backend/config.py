@@ -34,3 +34,12 @@ MEMORIES_IN_PROMPT = 8         # recent memories shown to the LLM
 MINUTES_PER_TICK = 5
 TICKS_PER_HOUR = 60 // MINUTES_PER_TICK   # 12
 TICKS_PER_DAY = TICKS_PER_HOUR * 24       # 288
+
+# Who advances time (see backend/sim/runner.py).
+# TICK_INTERVAL_SECONDS > 0: the server ticks by itself, one tick every N
+# real seconds — the public deployment. 0 (default) = no background loop;
+# time only moves through POST /tick, as in local dev.
+TICK_INTERVAL_SECONDS = float(os.getenv("TICK_INTERVAL_SECONDS", "0"))
+# POST /tick lets any caller advance time, and every tick costs LLM calls.
+# On for local dev; set MANUAL_TICK_ENABLED=0 on the public server.
+MANUAL_TICK_ENABLED = os.getenv("MANUAL_TICK_ENABLED", "1").lower() not in ("0", "false", "off")

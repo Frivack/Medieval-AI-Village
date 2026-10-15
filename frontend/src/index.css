@@ -41,6 +41,18 @@ body {
 .controls button:hover:not(:disabled) { background: #4a4133; }
 .controls button:disabled { opacity: 0.45; cursor: default; }
 .controls .auto.on { background: #5c4a3d; border-color: var(--gold); }
+.live {
+  display: flex; align-items: center; gap: 0.35rem;
+  color: var(--red); font-size: 0.78rem; letter-spacing: 0.1em;
+  cursor: help;
+}
+.live-dot {
+  width: 0.5rem; height: 0.5rem; border-radius: 50%;
+  background: var(--red);
+  animation: live-pulse 2s ease-in-out infinite;
+}
+@keyframes live-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 
 .error-banner {
   background: #5a2c24; color: #f0d5cf;

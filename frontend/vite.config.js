@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: Object.fromEntries(
-      ["/map", "/villagers", "/tick", "/time", "/history"].map((p) => [
+      ["/map", "/villagers", "/tick", "/time", "/history", "/status"].map((p) => [
         p,
         { target: BACKEND, changeOrigin: true },
       ])

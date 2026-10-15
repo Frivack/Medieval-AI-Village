@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { advanceTicks, fetchHistory, fetchMap, fetchTime, fetchVillagers } from "./api.js";
+import { advanceTicks, fetchHistory, fetchMap, fetchStatus, fetchTime, fetchVillagers } from "./api.js";
 import ControlBar from "./components/ControlBar.jsx";
 import HistoryFeed from "./components/HistoryFeed.jsx";
 import MapCanvas from "./components/MapCanvas.jsx";
 import VillagerPanel from "./components/VillagerPanel.jsx";
 
-const POLL_MS = 2000;      // background refresh (catches ticks from other clients)
+const POLL_MS = 2000;      // background refresh (catches ticks from the server loop / other clients)
 const AUTO_TICK_MS = 700;  // pace of the ▶ Auto mode
 
 export default function App() {
   const [map, setMap] = useState(null);
+  const [status, setStatus] = useState(null); // how this server advances time
   const [villagers, setVillagers] = useState([]);
   const [time, setTime] = useState(null);
   const [history, setHistory] = useState([]);
@@ -32,9 +33,10 @@ export default function App() {
     }
   }, []);
 
-  // Static map: fetched once.
+  // Static map and server mode: fetched once.
   useEffect(() => {
     fetchMap().then(setMap).catch((e) => setError(String(e)));
+    fetchStatus().then(setStatus).catch((e) => setError(String(e)));
     refresh();
   }, [refresh]);
 
@@ -75,6 +77,7 @@ export default function App() {
     <div className="app">
       <ControlBar
         time={time}
+        status={status}
         busy={busy}
         autoRun={autoRun}
         onAdvance={onAdvance}

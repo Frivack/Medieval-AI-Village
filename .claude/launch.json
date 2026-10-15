@@ -27,6 +27,25 @@
         "S:\\ClCode\\AI Village\\frontend"
       ],
       "port": 5173
+    },
+    {
+      "name": "ai-village-api-live",
+      "runtimeExecutable": "C:\\Users\\Minjun\\anaconda3\\envs\\ai-village\\python.exe",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "backend.main:app",
+        "--app-dir",
+        "S:\\ClCode\\AI Village",
+        "--port",
+        "8001"
+      ],
+      "env": {
+        "TICK_INTERVAL_SECONDS": "10",
+        "MANUAL_TICK_ENABLED": "0",
+        "LLM_CONNECT_TIMEOUT": "0.2"
+      },
+      "port": 8001
     }
   ]
 }

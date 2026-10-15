@@ -44,6 +44,9 @@ section described work that was never committed.)*
   `data/agents.json` on startup. Delete it to reset the world.
 - `.claude/launch.json` holds the dev-server config so Claude Code's
   browser preview can start uvicorn (local port 8000).
+  `ai-village-api-live` (port 8001) previews production mode locally:
+  server-driven ticks every 10 s, manual ticks off. It ticks the same
+  `data/village.db`, so don't run it next to `ai-village-api`.
 
 ### Agents
 Four agents, defined together in **`data/agents.json`** (single file, one
@@ -85,6 +88,17 @@ entry per agent, includes `workplace`):
   minute-0 tick); sleeping agents skip re-decisions until 06:00 to save
   LLM calls. `POST /tick?count=N` advances up to one day per call;
   `GET /time`, `GET /history` for inspection.
+- **Who advances time** (`backend/sim/runner.py`, since 2026-10-15):
+  `TICK_INTERVAL_SECONDS > 0` starts a background loop in the FastAPI
+  lifespan — one tick every N real seconds, fixed rate with no catch-up
+  bursts, first tick one interval after startup, a failed tick is logged
+  and skipped, shutdown waits for the in-flight tick. Default `0` = no
+  loop (local dev). `MANUAL_TICK_ENABLED=0` makes `POST /tick` return 403
+  — required on the public server, since every tick costs LLM calls.
+  Loop and `/tick` share one lock, so ticks never overlap. `GET /status`
+  reports both settings; the frontend swaps the tick buttons for a LIVE
+  badge when manual ticking is off. Single uvicorn worker only — each
+  worker would run its own loop.
 
 ### LLM integration
 - `backend/llm/client.py` — OpenAI-compatible `/chat/completions` via httpx.
