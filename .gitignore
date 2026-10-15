@@ -231,3 +231,6 @@ data/chroma/
 
 # Local-only notes with infrastructure details — never commit
 CLAUDE.local.md
+
+# Claude Code conversation archive (local only)
+claude-history/
