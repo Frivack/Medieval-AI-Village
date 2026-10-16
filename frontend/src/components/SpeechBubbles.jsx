@@ -1,31 +1,30 @@
 import { formatCopper } from "../currency.js";
 
-// Speech bubbles over the speakers: HTML laid over the map canvas, placed
-// in percent of the map so they follow it when it scales down. A bubble
-// holds the line said this tick (one tick = one line), so on the live
-// server each line stays up for a tick and then the partner answers.
-// The talking-now panel carries the same lines for screen readers, so the
-// overlay itself is hidden from them.
+// Speech bubbles over the speakers' heads: HTML laid over the map canvas.
+// They are part of the map, not of the page: positions are in percent of
+// the map and every size is in container units of the map's width (cqw,
+// see .map-stage in index.css), so a bubble keeps the same size relative
+// to the villagers and grows or shrinks with the map. A bubble holds the
+// line said this tick (one tick = one line), so on the live server each
+// line stays up for a tick and then the partner answers. The talking-now
+// panel carries the same lines for screen readers, so the overlay itself
+// is hidden from them.
 
-const NEAR_TILES = 16;   // bubbles closer than this sideways stack upwards
+const NEAR_TILES = 15;   // bubbles closer than this sideways stack upwards
 
 export default function SpeechBubbles({ bubbles, positions, width, height }) {
-  const placed = layout(bubbles, positions);
   return (
     <div className="bubble-layer" aria-hidden="true">
-      {placed.map(({ bubble, pos, level, below }) => {
-        const xFrac = pos.x / width;
-        // Keep bubbles inside the map: near an edge, anchor them by that edge.
-        const align = xFrac < 0.2 ? "left" : xFrac > 0.8 ? "right" : "center";
-        // Above the name tag, or under the villager near the top of the map.
-        const anchorY = below ? pos.y + (pos.labelBelow ? 1.9 : 0.9)
-                              : pos.y - (pos.labelBelow ? 0.9 : 1.9);
+      {layout(bubbles, positions).map(({ bubble, pos, level }) => {
+        // The tail tip sits just over the head — over the name tag when
+        // the tag is drawn above the villager (see layout.js).
+        const anchorY = pos.y - (pos.labelBelow ? 0.7 : 1.85);
         return (
           <div
             key={bubble.key}
-            className={`bubble align-${align}${below ? " below" : ""}`}
+            className="bubble"
             style={{
-              left: `${xFrac * 100}%`,
+              left: `${(pos.x / width) * 100}%`,
               top: `${(anchorY / height) * 100}%`,
               "--level": level,
               "--accent": bubble.color,
@@ -51,9 +50,8 @@ export default function SpeechBubbles({ bubbles, positions, width, height }) {
   );
 }
 
-// Which way each bubble opens and how far it stacks: two conversations at
-// the Inn put two speakers a few tiles apart, so the later bubble moves up
-// one level instead of covering the first.
+// Two conversations at the Inn put two speakers a few tiles apart, so the
+// later bubble moves up one level instead of covering the first.
 function layout(bubbles, positions) {
   const placed = [];
   const sorted = bubbles
@@ -61,10 +59,9 @@ function layout(bubbles, positions) {
     .sort((a, b) => positions.get(a.speakerId).x - positions.get(b.speakerId).x);
   for (const bubble of sorted) {
     const pos = positions.get(bubble.speakerId);
-    const below = pos.y < 15;            // near the top edge: open downwards
-    const level = placed.filter((p) => p.below === below
-      && Math.abs(p.pos.x - pos.x) < NEAR_TILES && Math.abs(p.pos.y - pos.y) < 8).length;
-    placed.push({ bubble, pos, level, below });
+    const level = placed.filter((p) => Math.abs(p.pos.x - pos.x) < NEAR_TILES
+                                       && Math.abs(p.pos.y - pos.y) < 8).length;
+    placed.push({ bubble, pos, level });
   }
   return placed;
 }

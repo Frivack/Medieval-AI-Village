@@ -260,21 +260,26 @@ entry per agent, includes `workplace`):
   the sim) around it by name — presentation only — and puts the lower
   row's name tags below them.
 - **Speech bubbles** (`SpeechBubbles.jsx`, stage 4): HTML over the canvas,
-  placed in percent of the map so they scale with it. A bubble is the
-  newest line of a conversation when it was said on the current tick, so
-  on the live server each line stays up for one tick (60 s). Up to 3 lines
-  of text, an offer chip (drawn coin, not an emoji — 🪙 rendered as a box
-  here) and accept/refuse chip; nearby bubbles stack upwards, bubbles open
-  downwards near the top edge and anchor to the side near the left/right
-  edges. `aria-hidden` — the panel carries the same lines.
+  part of the map rather than the page: positions in percent of the map,
+  sizes in `cqw` of the map's width (`.map-stage` is a size container) —
+  font 0.9cqw, at most 15 tiles wide — so a bubble keeps its size
+  relative to the villagers and grows or shrinks with the map (the user's
+  call, 2026-10-16: page-sized bubbles covered half a small map). The
+  tail tip sits just over the speaker's head (over the name tag when it's
+  drawn above). A bubble is the newest line of a conversation when it was
+  said on the current tick, so on the live server each line stays up for
+  one tick (60 s). Up to 3 lines of text, an offer chip (drawn coin, not
+  an emoji — 🪙 rendered as a box here) and accept/refuse chip; nearby
+  bubbles stack upwards. `aria-hidden` — the panel carries the same lines.
 - **Talking now** (`ConversationPanel.jsx`, stage 4): top of the sidebar;
   each active conversation grows one line per tick with chips for offers
   (unit price in plain copper), accept/refuse, the settled deal and why a
   deal fell through; `aria-live`. When nobody talks it says so and keeps
   the last conversation folded underneath.
-- Checked in the browser preview in template mode: bubble tail on the
-  speaker, a second bubble stacks 6 px above, no horizontal scroll at
-  375 px.
+- Checked in the browser preview in template mode: the bubble is 15% of
+  the map at both 1044 px and 604 px map widths with its tail tip on the
+  speaker's head, a second bubble stacks above the first, no horizontal
+  scroll at 375 px.
 
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
