@@ -33,6 +33,18 @@ def _me(agent, now: int) -> dict:
             "doing": schedule.describe(block) if block else None}
 
 
+def _outcome(line: dict, deals) -> str | None:
+    """What a line's answer to an offer led to: the settled deal (same
+    tick — one line per tick) or the reason it fell through."""
+    if line.get("note"):
+        return line["note"]
+    deal = next((d for d in deals or [] if d["tick"] == line["tick"]), None)
+    if deal and line.get("response") == "accept":
+        return (f"deal done: {deal['buyer']} bought {deal['quantity']} {deal['item']} "
+                f"from {deal['seller']} for {deal['price']}c")
+    return None
+
+
 def speaker_view(convo, speaker, partner, now: int, affinity: int, lines_left: int) -> dict:
     me = _me(speaker, now)
     pending = convo.pending_offer
@@ -47,8 +59,11 @@ def speaker_view(convo, speaker, partner, now: int, affinity: int, lines_left: i
         "i_started": convo.a_id == speaker.id,
         "reason": convo.reason,
         "topic": convo.topic or {},
-        "transcript": [{"speaker": l["speaker"], "text": l["text"], "shared": l.get("shared", False)}
+        # Each line with what came of it, so nobody re-offers a closed deal.
+        "transcript": [{"speaker": l["speaker"], "text": l["text"], "shared": l.get("shared", False),
+                        "outcome": _outcome(l, convo.deals)}
                        for l in convo.lines or []],
+        "deals": list(convo.deals or []),
         # Only an offer the partner made is mine to answer.
         "pending_offer": pending if pending and pending["by"] == partner.id else None,
         "could_buy": trade.best_offer(speaker, partner, me["needs"], convo.place),

@@ -22,8 +22,14 @@ from backend.world.map import village_map
 MAX_LINES = 8
 COOLDOWN_TICKS = 2 * TICKS_PER_HOUR   # same pair can't chat again for 2 in-game hours
 CHAT_CHANCE = 0.05                    # per free pair, per minute of shared leisure
-AFFINITY_RANGE = (-10, 10)
-AFFINITY_STEP = 2                     # the most one conversation can move it
+# Affinity is a long scale: in the 2-day model comparison a pair gained
+# ~1.5 a day (at most 3), so "close friend" (20, prompts._affinity) takes
+# one to two weeks of good meetings. A planner answers -2..+2 per
+# conversation; a drop counts three times as much as a gain — trust is
+# lost faster than it's won.
+AFFINITY_RANGE = (-30, 30)
+AFFINITY_STEP = 2                     # the most a planner can move it per conversation
+NEGATIVE_WEIGHT = 3
 
 
 class Relations:
@@ -214,6 +220,8 @@ def _apply_replan(plan: dict, me, other, now: int, relations: Relations, people)
         step = max(-AFFINITY_STEP, min(AFFINITY_STEP, int(plan.get("affinity") or 0)))
     except (TypeError, ValueError):
         step = 0
+    if step < 0:
+        step *= NEGATIVE_WEIGHT
     row.affinity = max(AFFINITY_RANGE[0], min(AFFINITY_RANGE[1], (row.affinity or 0) + step))
     return {**record, "affinity": step}
 

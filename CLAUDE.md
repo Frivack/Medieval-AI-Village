@@ -84,7 +84,7 @@ entry per agent, includes `workplace`):
 - **Conversations** (`backend/sim/conversation.py`, stage 2, since
   2026-10-16): 1:1, **one line per tick**, turns alternate; tables
   `Conversation` (transcript, pending offer, deals, end reason) and
-  `Relationship` (directed affinity −10..10, last talk tick).
+  `Relationship` (directed affinity −30..30, last talk tick).
   - *Start* (code, `pick()`): same building, both awake/standing/free.
     Reasons in order: trade (someone here sells what I want — this is how
     all buying happens now), appointment (a VISIT block `with` them), news
@@ -100,13 +100,23 @@ entry per agent, includes `workplace`):
     partner's offer settles it at once (checked + clamped); one pending
     offer at a time; max 8 lines; bedtime ends it; an unanswered offer
     lapses. Told news is marked and the listener remembers "X told me: …".
+    The view also lists the deals already settled in this conversation,
+    and each transcript line carries its `outcome` ("deal done: …" or why
+    it fell through) — before that, models re-offered closed deals and the
+    partner accepted again (duplicate trades).
   - *After* (`end()`): each side gets a *planner* call `view -> {change,
     ops, memory, affinity}` (`apply_plan()`, shared with the wake-up
     plan): ops are validated and applied by `schedule.apply_ops`, the
-    memory is stored (importance 1–3), affinity moves ≤ 2 per
-    conversation, last talk is recorded. What each side made of it lands
-    in `Conversation.replans` (applied / rejected ops with the reason,
-    memory, affinity).
+    memory is stored (importance 1–3), last talk is recorded. What each
+    side made of it lands in `Conversation.replans` (applied / rejected
+    ops with the reason, memory, affinity).
+  - *Affinity* is a long scale, −30..30 (`conversation.AFFINITY_RANGE`):
+    words in the prompts at ±5 (like / wary), +20 close friend, −15
+    dislike. A planner answers −2..+2 per conversation; a drop counts
+    ×3 (`NEGATIVE_WEIGHT`) — trust is lost faster than it's won. Measured
+    gain is ~1.5 a day per pair, so friendship takes one to two weeks of
+    good meetings (on the old −10..10 scale everyone "liked" each other
+    after a day).
   - *Templates* (`template_turn` / `template_replan`): answer offers, buy
     what's wanted, share one piece of news in social talk, small talk,
     goodbye; replan changes nothing (no affinity drift without an LLM).
@@ -190,7 +200,11 @@ entry per agent, includes `workplace`):
     records the days): one planner call sees today's and tomorrow's
     blocks, its memories and needs, and may edit the schedule (validated
     as above). Templates keep the routine. Checked before eating or
-    talking, so a hungry wake-up still plans.
+    talking, so a hungry wake-up still plans. **It only edits the
+    schedule, like a tool call** (the user's call, 2026-10-16): its own
+    prompt and schema (`prompts.WAKE_SYSTEM` / `WAKE_SCHEMA`: `change`,
+    `ops`) have no memory or affinity, and `_plan_day` drops anything
+    else; an edit's reason lives in the block's `why`.
 - **Who advances time** (`backend/sim/runner.py`, since 2026-10-15):
   `TICK_INTERVAL_SECONDS > 0` starts a background loop in the FastAPI
   lifespan — one tick every N real seconds, fixed rate with no catch-up
@@ -217,7 +231,7 @@ entry per agent, includes `workplace`):
     `template`, so local "+1 day" clicks cost nothing). Each Claude call
     that fails falls back to the template for that one line or plan.
   - `backend/llm/claude.py`: official `anthropic` SDK, structured outputs
-    (`prompts.TURN_SCHEMA` / `PLAN_SCHEMA`), the fixed system prompt
+    (`prompts.TURN_SCHEMA` / `PLAN_SCHEMA` / `WAKE_SCHEMA`), the fixed system prompt
     cache-marked (≈60% of input tokens are cache reads), effort `low`,
     per-model thinking (Haiku `disabled`, Sonnet `between_tools`, Opus
     5.5 can't disable it — omitted). Opus/Sonnet requests go through the
@@ -246,7 +260,9 @@ entry per agent, includes `workplace`):
 - **Short-term memory:** every notable event is written to
   `AgentState.short_term_memory` (ring buffer, newest 50) by
   `remember()` in `backend/memory/short_term.py` — arrivals, trades (both
-  sides: wheat/tools importance 3, routine food purchases 1), a broken
+  sides: wheat/tools importance 3; everyday goods — food, ale,
+  vegetables, `economy.EVERYDAY_GOODS` — importance 1, so a mug of ale
+  isn't retold as news), a broken
   farming tool (2), hourly WORK output (1), news heard ("X told me: …", 1),
   a one-line summary of each social conversation (1). Memories carry a
   `told` list so news isn't repeated to the same person.
@@ -254,8 +270,8 @@ entry per agent, includes `workplace`):
   moved out of the old decider): top-8 by `importance × 6 in-game hours −
   age`, duplicates collapsed, shown chronologically. Recency alone drowned
   a trade under one evening of repeated greetings — that's why importance
-  exists. Feeds the speaker and planner prompts; planners add their own
-  one-line memory after each conversation and on waking.
+  exists. Feeds the speaker and planner prompts; the planner adds its own
+  one-line memory after each conversation (never on waking).
 - **ChromaDB long-term store is OPTIONAL** (`backend/memory/store.py`):
   install `chromadb` on the dev PC only — far too heavy for the 1 GB
   deployment box, which degrades gracefully to a null store. When
@@ -436,10 +452,17 @@ low) showed:
      schedules, affinity +1 after nearly every talk. Opus: most coherent —
      keeps agreed prices across conversations, affinity −1 when cheated,
      schedule edits that follow from promises.
-   - Follow-ups the comparison exposed (all models): affinity inflation;
-     ale purchases stored at importance 3 and retold as news; the speaker
-     view doesn't list deals already settled in the conversation; wake-up
-     plans rarely change anything (fine — 4 calls a day).
+   - Fixed after the comparison (2026-10-16): affinity inflation (long
+     −30..30 scale, drops ×3), ale stored as news (everyday goods at
+     importance 1), closed deals re-offered (settled deals shown to the
+     speaker), wake-up plans writing filler memories (now schedule edits
+     only). A paid Opus day against the old Opus day 1: duplicate deals
+     2 → 0, news about everyday goods 5 → 0, wake-up memories 1 → 0, and
+     every pair still "neutral" after a day except one that turned
+     "wary" after being cheated twice.
+   - Open: money in memories and lines ("14 silver", "3s 4c") gets
+     misconverted (1 silver taken as 20c) and spreads as rumor — write
+     trade memories in copper with a per-unit price.
 4. Frontend: bubbles + live panel first.
 5. Deploy to a dedicated instance: server-driven ticks every 60 s, manual
    ticks off.

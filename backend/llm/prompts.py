@@ -31,28 +31,43 @@ SPEAKER_SYSTEM = f"""You voice one villager in a small medieval village simulati
 YOUR TURN — answer with JSON:
 - line: what your villager says now. One or two short sentences, in character, plain spoken English. No narration, no stage directions, no quotation marks around it.
 - offer: a deal you propose, or null. kind "buy" = you buy from them; kind "sell" = you sell to them. price is the TOTAL in copper for the whole quantity. Only buy what they sell here; only sell what you have to sell. A counter-offer is simply a new offer. The line should say it too.
-- response: "accept" or "reject" to their pending offer; null if there is none. Accepting completes the deal at once.
+- response: "accept" or "reject" to their pending offer; null if there is none. Accepting completes the deal at once: the goods and coin change hands right then. A deal marked as done is finished; offer it again only if you really want that much more.
 - share: the id (like "n1") of one piece of news from your list that you tell them in this line, or null.
 - end: true if this line ends the conversation (say goodbye in it).
 
 Stay true to your personality, your needs and your memories. You only know what you are told here: not the other villager's money, stock or thoughts. Haggle if it suits you; refuse if it suits you. The whole conversation has at most 8 lines, so get to the point."""
 
-PLANNER_SYSTEM = f"""You plan the schedule of one villager in a small medieval village simulation, either when they wake up or right after a conversation.
+_SCHEDULE = """The schedule is a list of time blocks with ids. "routine" blocks are the villager's usual day. Activities: WORK (only at your own workplace — it produces your goods), SOCIAL (spend time at a place, usually the Inn in the evening), SLEEP (at home), VISIT (go to a place; with a person = meeting them there). Walking takes time: up to about an hour between buildings."""
 
-{_WORLD}
-
-The schedule is a list of time blocks with ids. "routine" blocks are the villager's usual day. Activities: WORK (only at your own workplace — it produces your goods), SOCIAL (spend time at a place, usually the Inn in the evening), SLEEP (at home), VISIT (go to a place; with a person = meeting them there). Walking takes time: up to about an hour between buildings.
-
-ANSWER WITH JSON:
-- change: false if the schedule should stay as it is — the usual answer. Change it only for a real reason this villager has: a promise or arrangement they made, something they need to buy or sell, something they heard, how they feel.
+_OPS = f"""- change: false if the schedule should stay as it is — the usual answer. Change it only for a real reason this villager has: a promise or arrangement they made, something they need to buy or sell, something they heard, how they feel.
 - ops: up to {schedule.MAX_OPS} edits, applied in order (empty if change is false):
   insert: day, from "HH:MM", to "HH:MM", do, at, with (a villager or null), why — the new block wins over whatever it overlaps.
   cancel: block (id) — an added block gives way to what it replaced; a cancelled routine block leaves free time.
   move: block (id), day, from, to — the same activity at a new time (what it replaced comes back).
-  Use null for fields an edit doesn't need. Times on a {schedule.GRID_MINUTES}-minute grid, from now until the end of tomorrow. Every night must keep at least {schedule.SLEEP_FLOOR_MINUTES // 60} hours of sleep. Invalid edits are dropped.
+  Use null for fields an edit doesn't need. Times on a {schedule.GRID_MINUTES}-minute grid, from now until the end of tomorrow. Every night must keep at least {schedule.SLEEP_FLOOR_MINUTES // 60} hours of sleep. Invalid edits are dropped."""
+
+PLANNER_SYSTEM = f"""You plan the schedule of one villager in a small medieval village simulation, right after a conversation they had.
+
+{_WORLD}
+
+{_SCHEDULE}
+
+ANSWER WITH JSON:
+{_OPS}
 - memory: one short first-person sentence worth remembering (a plan, a promise, an impression), or null.
 - importance: 1 (routine), 2 (notable) or 3 (important) for that memory.
-- affinity: how a conversation changed your feeling toward the other person, from -2 to 2 (0 if it didn't, and 0 when waking up)."""
+- affinity: how the conversation changed your feeling toward the other person, from -2 to 2 (0 if it didn't)."""
+
+# Waking up only edits the schedule — like a tool call, it leaves no text
+# behind (no memory, no affinity). The user's call, 2026-10-16.
+WAKE_SYSTEM = f"""You manage the schedule of one villager in a small medieval village simulation at the moment they wake up. You don't speak and you write nothing down: your only output is edits to their schedule, the way a tool is called — or no edits at all.
+
+{_WORLD}
+
+{_SCHEDULE}
+
+ANSWER WITH JSON:
+{_OPS}"""
 
 _NULL = {"type": "null"}
 
@@ -79,22 +94,29 @@ TURN_SCHEMA = _object({
     "end": {"type": "boolean"},
 })
 
+_OP_SCHEMA = _object({
+    "op": {"type": "string", "enum": ["insert", "cancel", "move"]},
+    "block": _nullable({"type": "string"}),
+    "day": _nullable({"type": "integer"}),
+    "from": _nullable({"type": "string"}),
+    "to": _nullable({"type": "string"}),
+    "do": _nullable({"type": "string", "enum": list(schedule.ACTIVITIES)}),
+    "at": _nullable({"type": "string", "enum": PLACES}),
+    "with": _nullable({"type": "string", "enum": VILLAGERS}),
+    "why": _nullable({"type": "string"}),
+})
+
 PLAN_SCHEMA = _object({
     "change": {"type": "boolean"},
-    "ops": {"type": "array", "items": _object({
-        "op": {"type": "string", "enum": ["insert", "cancel", "move"]},
-        "block": _nullable({"type": "string"}),
-        "day": _nullable({"type": "integer"}),
-        "from": _nullable({"type": "string"}),
-        "to": _nullable({"type": "string"}),
-        "do": _nullable({"type": "string", "enum": list(schedule.ACTIVITIES)}),
-        "at": _nullable({"type": "string", "enum": PLACES}),
-        "with": _nullable({"type": "string", "enum": VILLAGERS}),
-        "why": _nullable({"type": "string"}),
-    })},
+    "ops": {"type": "array", "items": _OP_SCHEMA},
     "memory": _nullable({"type": "string"}),
     "importance": {"type": "integer"},
     "affinity": {"type": "integer"},
+})
+
+WAKE_SCHEMA = _object({
+    "change": {"type": "boolean"},
+    "ops": {"type": "array", "items": _OP_SCHEMA},
 })
 
 
@@ -125,11 +147,15 @@ def speaker_prompt(v: dict) -> str:
         o = v["could_buy"]
         parts.append(f"You'd like to buy {o['quantity']} {o['item']} from them "
                      f"({o['price']}c in total at the usual price).")
+    if v["deals"]:
+        parts.append("Already done in this conversation (goods and coin have changed hands): "
+                     + "; ".join(_deal(d) for d in v["deals"]) + ".")
     if v["pending_offer"]:
         parts.append(f"{partner}'s offer, waiting for your response: {_offer(v['pending_offer'], partner)}.")
     if v["transcript"]:
         parts.append("The conversation so far:\n" + "\n".join(
             f"{l['speaker']}{' (you)' if l['speaker'] == me['name'] else ''}: {l['text']}"
+            + (f"  [{l['outcome']}]" if l.get("outcome") else "")
             for l in v["transcript"]))
     parts.append(f"{v['lines_left']} line(s) left in this conversation. Your turn, {me['name']}.")
     return "\n\n".join(parts)
@@ -148,9 +174,7 @@ def plan_prompt(v: dict) -> str:
         parts.append("The conversation:\n" + "\n".join(f"{l['speaker']}: {l['text']}"
                                                          for l in v["transcript"]))
         if v["deals"]:
-            parts.append("Deals made: " + "; ".join(
-                f"{d['buyer']} bought {d['quantity']} {d['item']} from {d['seller']} for {d['price']}c"
-                for d in v["deals"]))
+            parts.append("Deals made: " + "; ".join(_deal(d) for d in v["deals"]))
     parts.append(_state(me))
     if v["memories"]:
         parts.append("What you remember:\n" + "\n".join(v["memories"]))
@@ -159,7 +183,7 @@ def plan_prompt(v: dict) -> str:
         + (f" with {b['with']}" if b["with"] else "") + (f" ({b['why']})" if b["why"] else "")
         + (" — routine" if b["routine"] else "")
         for b in v["schedule"]))
-    parts.append("Does anything call for a change? Plan for yourself, " + me["name"] + "."
+    parts.append(f"Does anything call for a change to {me['name']}'s schedule today?"
                  if v["event"] == "wake_up" else
                  "Did this conversation give you a reason to change your schedule?")
     return "\n\n".join(parts)
@@ -212,8 +236,9 @@ def _tool(t: int) -> str:
 
 
 def _affinity(a: int) -> str:
-    return ("you dislike them" if a <= -6 else "you're wary of them" if a <= -2
-            else "nothing in particular" if a < 2 else "you like them" if a < 6
+    """The -30..30 scale in words (conversation.AFFINITY_RANGE)."""
+    return ("you dislike them" if a <= -15 else "you're wary of them" if a <= -5
+            else "nothing in particular" if a < 5 else "you like them" if a < 20
             else "they're a close friend")
 
 
@@ -236,6 +261,10 @@ def _goods(label: str, prices: dict, note: str) -> str:
     if not prices:
         return ""
     return f"{label}: " + ", ".join(f"{item} {p}c" for item, p in prices.items()) + f" ({note})."
+
+
+def _deal(d: dict) -> str:
+    return f"{d['buyer']} bought {d['quantity']} {d['item']} from {d['seller']} for {d['price']}c"
 
 
 def _offer(o: dict, partner: str) -> str:

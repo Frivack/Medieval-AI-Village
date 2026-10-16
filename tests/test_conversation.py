@@ -1,8 +1,9 @@
 # The conversation engine against a real (temporary) SQLite database,
 # with the template speaker: no LLM involved.
 from backend.database import Conversation
+from backend.memory.short_term import news_for
 from backend.sim import conversation as conv
-from backend.sim import schedule
+from backend.sim import schedule, trade
 from backend.sim.clock import tick_at
 from tests.helpers import EVENING, villager
 
@@ -126,7 +127,7 @@ def test_a_replan_edits_the_schedule_and_is_recorded(db):
     convo = conv.start(db, thomas, edmund, "chat", {}, EVENING)
 
     def planner(view):
-        if view["me"]["name"] == "Edmund":     # no change, but a grudge (clamped to -2)
+        if view["me"]["name"] == "Edmund":     # a grudge: clamped to -2, drops count x3
             return {"change": False, "ops": [{"op": "cancel", "block": "anything"}],
                     "memory": None, "affinity": -5}
         return {"change": True, "affinity": 1,
@@ -146,5 +147,28 @@ def test_a_replan_edits_the_schedule_and_is_recorded(db):
     assert len(mine["rejected"]) == 1 and "5-minute grid" in mine["rejected"][0]
     assert thomas.short_term_memory[-1] == {"tick": EVENING, "importance": 3,
                                             "text": "Edmund will mend my plough tomorrow."}
-    assert his["applied"] == his["rejected"] == [] and his["affinity"] == -2
-    assert relations.affinity("edmund", "thomas") == -2 and relations.affinity("thomas", "edmund") == 1
+    assert his["applied"] == his["rejected"] == [] and his["affinity"] == -6
+    assert relations.affinity("edmund", "thomas") == -6 and relations.affinity("thomas", "edmund") == 1
+
+
+def test_affinity_is_a_long_scale_that_drops_faster_than_it_climbs(db):
+    thomas = villager(db, "Thomas", "Farmer", "Farm")
+    edmund = villager(db, "Edmund", "Blacksmith", "Smithy")
+    relations, by_id = conv.Relations(db), {a.id: a for a in (thomas, edmund)}
+    now = EVENING
+    for raw in [2] * 20 + [-2, -1]:            # twenty great talks, then a row and a slight
+        convo = conv.start(db, thomas, edmund, "chat", {}, now)
+        conv.end(convo, by_id, "goodbye", now, relations,
+                 lambda view: {"change": False, "ops": [], "memory": None, "affinity": raw})
+        now += 1
+    # +40 is capped at +30, then -6 and -3.
+    assert relations.affinity("thomas", "edmund") == 30 - 6 - 3
+
+
+def test_everyday_purchases_are_routine_memories_but_wheat_is_news(db):
+    margaret = villager(db, "Margaret", "Innkeeper", "Inn", {"ale": 5, "food": 5})
+    gilbert = villager(db, "Gilbert", "Merchant", "Market", {"wheat": 5})
+    trade.settle(gilbert, margaret, "ale", 1, 6, EVENING)        # Gilbert buys an ale
+    trade.settle(margaret, gilbert, "wheat", 2, 36, EVENING)     # and sells her wheat
+    assert [m["importance"] for m in gilbert.short_term_memory] == [1, 3]
+    assert [m["text"] for m in news_for(gilbert, "Edmund")] == [gilbert.short_term_memory[1]["text"]]

@@ -61,6 +61,9 @@ WHOLESALE = 0.8                                     # merchant buying stock from
 RETAIL = 1.2                                        # merchant selling
 MERCHANT_STOCK = {"wheat": 10, "farming_tools": 1}  # what Gilbert keeps on hand to resell
 INNKEEPER_INPUTS = {"wheat": 8}                     # Margaret's wheat buffer for cooking
+# Everyday goods: buying them is routine (memory importance 1), not news.
+# Everything else (wheat, tools, a sword) is a deal worth talking about.
+EVERYDAY_GOODS = {"food", "ale", "vegetables"}
 
 
 def needs_of(job: str, needs) -> dict:

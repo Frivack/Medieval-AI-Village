@@ -68,10 +68,27 @@ def test_prompts_render_from_real_views(views):
     assert "you just woke up" in plan and "WORK at Inn" in plan and "— routine" in plan
 
 
+def test_the_speaker_sees_deals_already_done(db):
+    gilbert = villager(db, "Gilbert", "Merchant", "Market", {"food": 0})
+    margaret = villager(db, "Margaret", "Innkeeper", "Inn", {"food": 10})
+    by_id, relations = {a.id: a for a in (gilbert, margaret)}, conv.Relations(db)
+    convo = conv.start(db, gilbert, margaret, "trade", {"item": "food"}, EVENING)
+    now = EVENING
+    while not convo.deals:                     # template lines: offer, then accept
+        conv.advance(convo, by_id, now, relations)
+        now += 1
+    text = prompts.speaker_prompt(speech.speaker_view(convo, gilbert, margaret, now, 0,
+                                                      conv.MAX_LINES - len(convo.lines)))
+    deal = "Gilbert bought 3 food from Margaret for 36c"
+    assert f"Already done in this conversation (goods and coin have changed hands): {deal}." in text
+    assert f"[deal done: {deal}]" in text
+
+
 def test_schemas_are_strict_objects():
-    for schema in (prompts.TURN_SCHEMA, prompts.PLAN_SCHEMA):
+    for schema in (prompts.TURN_SCHEMA, prompts.PLAN_SCHEMA, prompts.WAKE_SCHEMA):
         assert schema["additionalProperties"] is False
         assert set(schema["required"]) == set(schema["properties"])
+    assert set(prompts.WAKE_SCHEMA["properties"]) == {"change", "ops"}     # edits only
     assert prompts.TURN_SCHEMA["properties"]["offer"]["anyOf"][0]["properties"]["item"]["enum"] == prompts.ITEMS
 
 
@@ -106,10 +123,12 @@ def test_a_turn_request_and_its_cost(views, fake):
 
 
 def test_opus_runs_with_the_server_fallback_and_its_own_cache_price(views, fake):
-    client = fake({"change": False, "ops": [], "memory": None, "importance": 1, "affinity": 0},
-                  model="claude-opus-5-5")
-    assert claude.claude_plan(views["wake"])["change"] is False
+    client = fake({"change": False, "ops": []}, model="claude-opus-5-5")
+    plan = claude.claude_plan(views["wake"])
+    assert plan == {"change": False, "ops": [], "memory": None, "affinity": 0}
     request = client.requests[0]
+    assert request["system"][0]["text"] == prompts.WAKE_SYSTEM
+    assert request["output_config"]["format"]["schema"] == prompts.WAKE_SCHEMA
     assert "thinking" not in request                      # can't be disabled on Opus 5.5
     assert request["via_beta"] and request["fallbacks"] == "default"
     assert request["betas"] == ["server-side-fallback-2026-07-01"]

@@ -105,6 +105,8 @@ def claude_turn(view: dict) -> dict:
 
 
 def claude_plan(view: dict) -> dict:
-    data = _ask(prompts.PLANNER_SYSTEM, prompts.plan_prompt(view),
-                prompts.PLAN_SCHEMA, PLAN_MAX_TOKENS)
+    # Waking up has its own prompt and a schema with nothing but edits.
+    wake = view["event"] == "wake_up"
+    data = _ask(prompts.WAKE_SYSTEM if wake else prompts.PLANNER_SYSTEM, prompts.plan_prompt(view),
+                prompts.WAKE_SCHEMA if wake else prompts.PLAN_SCHEMA, PLAN_MAX_TOKENS)
     return prompts.plan_from_json(data)

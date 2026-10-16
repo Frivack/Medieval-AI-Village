@@ -51,11 +51,11 @@ def test_no_planning_while_asleep_or_twice_a_day(db, thomas, monkeypatch):
     assert calls == [] and entry["action"] == "WORK"
 
 
-def test_a_wake_up_plan_is_validated_and_applied(db, thomas, monkeypatch):
+def test_a_wake_up_plan_is_validated_and_applied_but_leaves_no_memory(db, thomas, monkeypatch):
     def planner(view):
         tonight = next(b for b in view["schedule"]
                        if b["do"] == "SLEEP" and b["from"] == "Day 3 22:00")
-        return {"change": True, "affinity": 0,
+        return {"change": True, "affinity": 2,       # a stray memory/affinity is dropped
                 "memory": {"text": "I need to buy food at the market today.", "importance": 2},
                 "ops": [{"op": "insert", "day": 3, "from": "12:00", "to": "12:30",
                          "do": "VISIT", "at": "Market", "why": "buy food"},
@@ -66,7 +66,9 @@ def test_a_wake_up_plan_is_validated_and_applied(db, thomas, monkeypatch):
     assert "sleep" in entry["plan"]["rejected"][0]
     assert schedule.current(thomas.daily_plan, tick_at(3, 12, 10))["at"] == "Market"
     assert schedule.current(thomas.daily_plan, tick_at(3, 23))["do"] == "SLEEP"
-    assert thomas.short_term_memory[-1]["text"] == "I need to buy food at the market today."
+    block = schedule.current(thomas.daily_plan, tick_at(3, 12, 10))
+    assert block["why"] == "buy food"            # the reason lives on the schedule block
+    assert thomas.short_term_memory == [] and entry["plan"]["memory"] is None
 
 
 def test_a_cancelled_block_leaves_free_time(db, thomas, monkeypatch):

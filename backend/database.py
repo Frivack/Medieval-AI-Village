@@ -90,7 +90,7 @@ class Relationship(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     agent_id = Column(String)
     other_id = Column(String)
-    affinity = Column(Integer, default=0)       # -10 (hostile) .. +10 (close)
+    affinity = Column(Integer, default=0)       # -30 (hostile) .. +30 (close); see conversation.py
     last_talk_tick = Column(Integer, nullable=True)
 
 

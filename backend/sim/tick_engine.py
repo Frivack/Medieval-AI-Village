@@ -165,10 +165,13 @@ def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set) -> d
 
 def _plan_day(agent, by_id: dict, tick: int, day: int) -> dict:
     """The wake-up planner: one call that sees today's schedule and may
-    edit it (validated like any other plan). Templates keep the routine."""
+    edit it (validated like any other plan). Templates keep the routine.
+    Like a tool call it only edits the schedule — whatever else a planner
+    returns (a memory, affinity) is dropped here."""
     agent.daily_plan = schedule.mark_planned(agent.daily_plan, day)
     answer = PLAN(speech.wake_view(agent, tick))
-    record = conversation.apply_plan(answer, agent, tick, [p.name for p in by_id.values()])
+    edits = {"change": answer.get("change"), "ops": answer.get("ops")}
+    record = conversation.apply_plan(edits, agent, tick, [p.name for p in by_id.values()])
     agent.status = "planning"
     changes = "; ".join(record["applied"]) or "kept the routine"
     return {"action": ActionType.OBSERVE.value,

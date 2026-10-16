@@ -59,8 +59,8 @@ def settle(buyer, seller, item: str, quantity: int, total: int, tick: int) -> li
     seller.inventory = economy.add_item(seller.inventory or {}, item, -quantity)
     buyer.wealth -= total
     seller.wealth += total
-    # Buying the daily meals is routine; a deal over wheat or tools is news.
-    importance = 1 if item == "food" else 3
+    # A meal or an ale is routine; a deal over wheat or tools is news.
+    importance = 1 if item in economy.EVERYDAY_GOODS else 3
     remember(buyer, tick, f"I bought {quantity} {item} from {seller.name} for {to_string(total)}.",
              importance)
     remember(seller, tick, f"I sold {quantity} {item} to {buyer.name} for {to_string(total)}.",
