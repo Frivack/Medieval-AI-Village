@@ -70,20 +70,75 @@ body {
   background: var(--panel); border: 2px solid var(--panel-edge);
   border-radius: 6px; padding: 0.6rem;
 }
+/* ---- zoom and pan (MapView.jsx) ----
+   The viewport clips; the world inside gets one translate+scale. No
+   will-change on the world: with it the browser zooms a cached bitmap and
+   text goes blurry. */
+/* clip, not just hidden: a hidden box can still be scrolled by the browser
+   (find-in-page on an off-screen name), which would shift the controls */
+.map-view { position: relative; overflow: hidden; overflow: clip; border-radius: 3px; user-select: none; }
+.map-view.zoomed { cursor: grab; }
+.map-view.zoomed:active { cursor: grabbing; }
+.map-world { transform-origin: 0 0; }
+.map-zoom {
+  position: absolute; top: 0.4rem; right: 0.4rem;
+  display: flex; align-items: center; gap: 0.25rem;
+}
+.map-zoom button {
+  font: inherit; font-size: 0.85rem; min-width: 1.9rem; height: 1.9rem;
+  padding: 0 0.45rem;
+  background: rgba(42, 37, 31, 0.88); color: var(--parchment);
+  border: 1px solid #55483a; border-radius: 4px; cursor: pointer;
+}
+.map-zoom button:hover:not(:disabled) { background: #4a4133; }
+.map-zoom button:disabled { opacity: 0.45; cursor: default; }
+.map-zoom button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.map-zoom-level {
+  font-size: 0.72rem; color: var(--parchment); font-variant-numeric: tabular-nums;
+  background: rgba(42, 37, 31, 0.88); padding: 0.15rem 0.35rem; border-radius: 4px;
+}
+@media (max-width: 600px) {
+  .map-zoom { top: 0.25rem; right: 0.25rem; }
+  .map-zoom button { min-width: 1.6rem; height: 1.6rem; font-size: 0.78rem; }
+}
+
 /* The map's width is the unit for everything drawn over it (cqw = 1% of
-   it), so speech bubbles scale with the map like the villagers do. */
+   it, i.e. one tile), so villagers and bubbles scale with the map. */
 .map-stage { position: relative; container-type: inline-size; }
 .map-canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
 
+/* ---- villagers and names (VillagerLayer.jsx): 1cqw = one tile ---- */
+.people-layer { position: absolute; inset: 0; pointer-events: none; }
+.building-label {
+  position: absolute; transform: translate(-50%, -50%);
+  font: bold 0.9cqw Georgia, serif; color: var(--parchment);
+  background: rgba(0, 0, 0, 0.55); padding: 0.05cqw 0.4cqw; white-space: nowrap;
+}
+.villager { position: absolute; width: 0; height: 0; }
+.villager-dot {
+  position: absolute; left: -0.55cqw; top: -0.55cqw;
+  width: 1.1cqw; height: 1.1cqw; border-radius: 50%;
+  border: 0.125cqw solid #1d1a16;
+}
+.villager-name {
+  position: absolute; top: -1.75cqw; transform: translateX(-50%);
+  height: 1cqw; line-height: 1cqw; padding: 0 0.33cqw;
+  font: bold 0.83cqw sans-serif; color: #fff;
+  background: rgba(0, 0, 0, 0.55); white-space: nowrap;
+}
+.villager-name.below { top: 0.75cqw; }
+
 /* ---- speech bubbles (HTML over the canvas, see SpeechBubbles.jsx) ----
-   Sized in map units: font 0.9cqw ≈ 11 px on the 1200 px native map, at
-   most 15 tiles wide; every other length is in em of that font. */
+   Sized in map units and smaller than a house (the Inn is 8 tiles wide):
+   at most 7 tiles wide, font 0.5cqw — a mark at the whole-map view,
+   readable from 2x zoom (≈10 px). Every other length is in em of that
+   font. */
 .bubble-layer { position: absolute; inset: 0; pointer-events: none; }
 .bubble {
   --gap: 0.4em;      /* between stacked bubbles */
   --tail: 0.45em;
   position: absolute;
-  max-width: 15cqw;
+  max-width: 7cqw;
   width: max-content;
   display: flex; flex-direction: column; gap: 0.15em;
   padding: 0.3em 0.5em;
@@ -91,7 +146,7 @@ body {
   border-radius: 0.6em;
   border-left: 0.25em solid var(--accent, var(--gold));
   box-shadow: 0 0.15em 0.4em rgba(0, 0, 0, 0.45);
-  font-size: 0.9cqw; line-height: 1.25;
+  font-size: 0.5cqw; line-height: 1.25;
   /* centred over the speaker, the tail tip on the anchor point */
   transform: translate(-50%, calc(-100% * (1 + var(--level)) - var(--level) * var(--gap) - var(--tail)));
   animation: bubble-in 0.25s ease-out;
@@ -108,7 +163,7 @@ body {
 .bubble-chip {
   align-self: flex-start;
   font-size: 0.82em; padding: 0.05em 0.45em; border-radius: 999px;
-  background: #d8c69c; color: #3d2f1f; white-space: nowrap;
+  background: #d8c69c; color: #3d2f1f;   /* wraps: the bubble is only 7 tiles wide */
 }
 /* a drawn coin instead of an emoji, which not every font has */
 .bubble-chip.coin::before {
@@ -212,5 +267,9 @@ body {
 /* ---- small screens ---- */
 @media (max-width: 900px) {
   .layout { flex-direction: column; }
+  /* Full width, not "as wide as the content": the map's content is a size
+     container (.map-stage), which counts as zero width, so a
+     shrink-to-fit map would collapse to nothing. */
+  .map-wrap { width: 100%; }
   .sidebar { width: 100%; max-height: none; }
 }

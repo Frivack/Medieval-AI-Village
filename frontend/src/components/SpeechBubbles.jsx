@@ -10,7 +10,7 @@ import { formatCopper } from "../currency.js";
 // panel carries the same lines for screen readers, so the overlay itself
 // is hidden from them.
 
-const NEAR_TILES = 15;   // bubbles closer than this sideways stack upwards
+const NEAR_TILES = 7;    // bubbles closer than this sideways (their width) stack upwards
 
 export default function SpeechBubbles({ bubbles, positions, width, height }) {
   return (

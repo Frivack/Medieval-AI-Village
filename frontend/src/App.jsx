@@ -4,7 +4,8 @@ import { advanceTicks, fetchConversations, fetchHistory, fetchMap, fetchStatus, 
 import ControlBar from "./components/ControlBar.jsx";
 import ConversationPanel from "./components/ConversationPanel.jsx";
 import HistoryFeed from "./components/HistoryFeed.jsx";
-import MapCanvas, { JOB_COLORS } from "./components/MapCanvas.jsx";
+import MapView from "./components/MapView.jsx";
+import { JOB_COLORS } from "./colors.js";
 import VillagerPanel from "./components/VillagerPanel.jsx";
 
 const POLL_MS = 2000;      // background refresh (catches ticks from the server loop / other clients)
@@ -109,7 +110,7 @@ export default function App() {
       {error && <div className="error-banner">{error}</div>}
       <main className="layout">
         <div className="map-wrap">
-          <MapCanvas map={map} villagers={villagers} bubbles={bubbles} />
+          <MapView map={map} villagers={villagers} bubbles={bubbles} />
         </div>
         <aside className="sidebar">
           <ConversationPanel conversations={conversations} colors={colorByName} />

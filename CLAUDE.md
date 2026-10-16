@@ -254,32 +254,47 @@ entry per agent, includes `workplace`):
 ### Frontend (`frontend/`, React + Vite; `frontend/dist` is committed)
 - `App.jsx` polls every 2 s: `/villagers`, `/time`, `/history?notable`,
   `/conversations?limit=10` (active ones plus the last few that ended).
-- **Map** (`MapCanvas.jsx`): static tiles drawn once to an offscreen
-  canvas, villagers redrawn on change. `layout.js` spreads villagers who
-  share a tile (everyone inside a building stands on its interior tile in
-  the sim) around it by name — presentation only — and puts the lower
-  row's name tags below them.
-- **Speech bubbles** (`SpeechBubbles.jsx`, stage 4): HTML over the canvas,
-  part of the map rather than the page: positions in percent of the map,
-  sizes in `cqw` of the map's width (`.map-stage` is a size container) —
-  font 0.9cqw, at most 15 tiles wide — so a bubble keeps its size
-  relative to the villagers and grows or shrinks with the map (the user's
-  call, 2026-10-16: page-sized bubbles covered half a small map). The
-  tail tip sits just over the speaker's head (over the name tag when it's
-  drawn above). A bubble is the newest line of a conversation when it was
-  said on the current tick, so on the live server each line stays up for
-  one tick (60 s). Up to 3 lines of text, an offer chip (drawn coin, not
-  an emoji — 🪙 rendered as a box here) and accept/refuse chip; nearby
+- **Map** (`MapView.jsx`) is three layers in one coordinate system, all
+  inside one "world" element: `TerrainCanvas.jsx` (tiles, drawn once,
+  memoized — scales up as pixel art), `VillagerLayer.jsx` (dots, name
+  tags, building names) and `SpeechBubbles.jsx`, both HTML so text stays
+  sharp when zoomed. Everything over the canvas is placed in percent of
+  the map and sized in `cqw` (`.map-stage` is a size container; 1cqw =
+  one tile). `layout.js` spreads villagers who share a tile (everyone
+  inside a building stands on its interior tile in the sim) around it by
+  name — presentation only — and puts the lower row's tags below them.
+- **Zoom and pan** (`MapView.jsx`, 2026-10-16): wheel zooms around the
+  pointer (listener registered non-passive so the page doesn't scroll),
+  `+` / `−` / Fit buttons with the zoom level, drag to move when zoomed,
+  two-finger pinch on phones; 1×–4×, one `translate()+scale()` on the
+  world, clamped so the map always fills the viewport. Touch:
+  `touch-action: pan-y` at 1× (a swipe still scrolls the page), `none`
+  when zoomed. `overflow: clip` on the viewport (a merely hidden box can
+  be scrolled by find-in-page and shifts the controls); no `will-change`
+  on the world (it would zoom a cached bitmap and blur the text).
+  Gotchas met: a size container counts as zero width, so in the narrow
+  column layout `.map-wrap` needs `width: 100%` or the map collapses;
+  ResizeObserver only reports when the page renders, so the viewport is
+  measured once directly too.
+- **Speech bubbles** (`SpeechBubbles.jsx`, stage 4): part of the map
+  rather than the page, smaller than a house (the user's call,
+  2026-10-16): at most 7 tiles wide (the Inn is 8), font 0.5cqw — a mark
+  at the whole-map view, readable from 2× zoom (≈10 px). The tail tip
+  sits just over the speaker's head (over the name tag when it's drawn
+  above). A bubble is the newest line of a conversation when it was said
+  on the current tick, so on the live server each line stays up for one
+  tick (60 s). Up to 3 lines of text, an offer chip (drawn coin, not an
+  emoji — 🪙 rendered as a box here) and accept/refuse chip; nearby
   bubbles stack upwards. `aria-hidden` — the panel carries the same lines.
 - **Talking now** (`ConversationPanel.jsx`, stage 4): top of the sidebar;
   each active conversation grows one line per tick with chips for offers
   (unit price in plain copper), accept/refuse, the settled deal and why a
   deal fell through; `aria-live`. When nobody talks it says so and keeps
   the last conversation folded underneath.
-- Checked in the browser preview in template mode: the bubble is 15% of
-  the map at both 1044 px and 604 px map widths with its tail tip on the
-  speaker's head, a second bubble stacks above the first, no horizontal
-  scroll at 375 px.
+- Checked in the browser preview in template mode: a bubble is 7×2.2
+  tiles at 1× (the Inn 8×6) and ≈11 px text at 2×; wheel zoom keeps the
+  point under the pointer, drag and the buttons work, pinch keeps its
+  centre; no horizontal scroll at 375 px.
 
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
