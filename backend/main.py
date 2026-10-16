@@ -11,10 +11,11 @@ from sqlalchemy.orm import Session
 
 from backend.config import (MANUAL_TICK_ENABLED, MINUTES_PER_TICK,
                             TICK_INTERVAL_SECONDS, TICKS_PER_DAY)
-from backend.database import init_db, get_db, AgentState, TickHistory, SimState
+from backend.database import init_db, get_db, AgentState, Conversation, TickHistory, SimState
 from backend.agents.loader import load_agents_from_json
 from backend.sim import economy, schedule
 from backend.sim.runner import run_tick_locked, tick_loop
+from backend.sim.clock import format_clock
 from backend.sim.tick_engine import game_time
 from backend.world.map import village_map
 
@@ -135,6 +136,25 @@ def get_history(limit: int = 50, notable: bool = False, db: Session = Depends(ge
          "action": r.action, "dialogue": r.dialogue,
          "copper_change": r.gold_change}
         for r in rows
+    ]
+
+
+@app.get("/conversations")
+def get_conversations(active: bool = False, limit: int = 10, db: Session = Depends(get_db)):
+    """Recent conversations, newest first, with their full transcripts.
+    active=true: only the ones still going (the live panel's source)."""
+    query = db.query(Conversation)
+    if active:
+        query = query.filter_by(status="active")
+    rows = query.order_by(Conversation.id.desc()).limit(limit).all()
+    names = {a.id: a.name for a in db.query(AgentState)}
+    return [
+        {"id": c.id, "a": names.get(c.a_id), "b": names.get(c.b_id),
+         "place": c.place, "reason": c.reason, "status": c.status,
+         "end_reason": c.end_reason, "started": format_clock(c.started_tick),
+         "ended": format_clock(c.ended_tick) if c.ended_tick is not None else None,
+         "lines": c.lines or [], "pending_offer": c.pending_offer, "deals": c.deals or []}
+        for c in rows
     ]
 
 

@@ -81,6 +81,11 @@ def insert(plan, block: dict) -> dict:
     return plan
 
 
+def blocks(plan) -> list[dict]:
+    """The plan's blocks in time order (copies)."""
+    return sorted(_load(plan)["blocks"], key=lambda b: b["start"])
+
+
 def current(plan, now: int):
     """The block covering tick `now`, or None."""
     for b in _load(plan)["blocks"]:

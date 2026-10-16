@@ -72,13 +72,46 @@ entry per agent, includes `workplace`):
 - **A\* pathfinding:** `backend/world/pathfinding.py`, 4-directional,
   agents move **1 tile per tick**; remaining path is stored on the agent row.
 - **Actions** (`ActionType`): `MOVE`, `WORK`, `TALK`, `TRADE`, `REST`,
-  `EAT`, `OBSERVE`, executed in `backend/sim/tick_engine.py`. Trades are
-  buyer-initiated and settle goods + copper atomically, both sides recorded
-  in `TickHistory` (`gold_change` column, value in copper).
+  `EAT`, `OBSERVE`, executed in `backend/sim/tick_engine.py`. One
+  `TickHistory` row per agent per tick (TALK rows carry the line in
+  `dialogue`), plus one TRADE row per side of a settled deal (`gold_change`
+  column, value in copper). Settlement lives in `backend/sim/trade.py`
+  (best offer, checks, 70–130% price clamp, settle).
+- **Conversations** (`backend/sim/conversation.py`, stage 2, since
+  2026-10-16): 1:1, **one line per tick**, turns alternate; tables
+  `Conversation` (transcript, pending offer, deals, end reason) and
+  `Relationship` (directed affinity −10..10, last talk tick).
+  - *Start* (code, `pick()`): same building, both awake/standing/free.
+    Reasons in order: trade (someone here sells what I want — this is how
+    all buying happens now), appointment (a VISIT block `with` them), news
+    (an unshared memory of importance ≥ 2; a memory naming the listener
+    isn't news to them), chat (5%/minute per pair). News and chat only off
+    work, with someone off work or hosting at their own workplace. A pair
+    waits 2 in-game hours before talking again, except for an urgent need.
+  - *A turn* (`speech.py`): the engine builds a speaker *view* (profile,
+    needs, schedule block, partner, affinity, transcript, the partner's
+    pending offer, the best thing I could buy from them, what they sell at
+    what price, unshared news, price list, lines left) and calls a
+    *speaker* `view -> {line, end, offer, response, share}`. Accepting the
+    partner's offer settles it at once (checked + clamped); one pending
+    offer at a time; max 8 lines; bedtime ends it; an unanswered offer
+    lapses. Told news is marked and the listener remembers "X told me: …".
+  - *After* (`end()`): each side gets a *replanner* `view -> {change, ops,
+    memory, affinity}`; affinity moves ≤ 2 per conversation, last talk is
+    recorded. **Schedule ops are not applied yet** — they come with the
+    Claude replanner and its validation in stage 3.
+  - *Templates* (`template_turn` / `template_replan`): answer offers, buy
+    what's wanted, share one piece of news in social talk, small talk,
+    goodbye; replan changes nothing (no affinity drift without an LLM).
+    Stage 3 swaps in Claude speaker/replanner functions with the same
+    signatures — the engine stays as is.
+  - `GET /conversations?active=&limit=` returns transcripts (stage 4's
+    live panel source); TALK lines already show in the village log.
 - **TRADE v2 negotiation** (`backend/sim/negotiation.py`, 2026-07-16):
   LLM seller/buyer reactions with counters clamped to 70–130% of base.
-  **Parked since stage 1b** — trades are priced by the economy rules
-  below; stages 2–3 fold negotiation into conversation offers.
+  **Unused since stage 1b** — prices come from the economy rules, and
+  haggling happens through conversation offers (counter = new offer).
+  Its prompts are a reference for the stage 3 speaker.
 - **Economy** (`backend/sim/economy.py`, stage 1b, since 2026-10-16) —
   rules and tuned numbers in one file, pure functions:
   - *Hunger* grows 8/h awake, 3/h asleep; at 50 a villager eats a carried
@@ -98,9 +131,11 @@ entry per agent, includes `workplace`):
     × wheat volume (derivation in `economy.py`). Tuned with
     `tools/simulate.py`: wheat 10→15c, tool wear 2/batch; 28 days end
     within ±6c/day for everyone except one-off effects of starting stock.
-  - *Tick order:* hunger → walk → eat → buy what's wanted from someone
-    here → urgent errand (hungry with no food, broken tool: go where it's
-    sold, if someone awake sells it) → schedule block.
+  - *Tick order:* everyone's hunger grows → every active conversation
+    says its next line (bedtime ends it) → everyone not talking: walk →
+    eat → start a conversation if there's a reason → urgent errand
+    (hungry with no food, broken tool: go where it's sold, if someone
+    awake sells it) → schedule block.
   - State: `AgentState.needs` JSON (`hunger`, `tool`), defaults via
     `economy.needs_of()` for NULL rows; shown as gauges on the cards.
 - **Time:** **1 tick = 1 in-game minute** (60 ticks/hour, 1440/day, since
@@ -147,10 +182,9 @@ entry per agent, includes `workplace`):
   Endpoint/model come from env vars (`LLM_BASE_URL`, `LLM_MODEL`); defaults
   to LM Studio at `http://localhost:1234/v1` (see `backend/config.py`).
 - **No LLM is called during a tick right now.** The per-tick decider was
-  removed in stage 1a and negotiation parked in 1b (2026-10-16); behavior
-  comes from schedules + economy rules, and the LLM returns for
-  conversations in stages 2–3 of the §6 redesign. The client is kept for
-  that.
+  removed in stage 1a and negotiation retired in 1b (2026-10-16); behavior
+  comes from schedules + economy rules, conversation lines from templates
+  (stage 2). Stage 3 plugs Claude into `speech`'s speaker/replanner slots.
 
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
@@ -160,10 +194,11 @@ entry per agent, includes `workplace`):
 ### Memory / retrieval (live since 2026-07-16)
 - **Short-term memory:** every notable event is written to
   `AgentState.short_term_memory` (ring buffer, newest 50) by
-  `_remember()` in the tick engine — arrivals, TALK dialogue (both
-  sides, importance 2), trades (both sides: wheat/tools importance 3,
-  routine food purchases 1), a broken farming tool (2), hourly WORK
-  output (importance 1).
+  `remember()` in `backend/memory/short_term.py` — arrivals, trades (both
+  sides: wheat/tools importance 3, routine food purchases 1), a broken
+  farming tool (2), hourly WORK output (1), news heard ("X told me: …", 1),
+  a one-line summary of each social conversation (1). Memories carry a
+  `told` list so news isn't repeated to the same person.
 - **Prompt selection** (`memory_lines` in `backend/memory/selection.py`,
   moved out of the old decider): top-8 by `importance × 6 in-game hours −
   age`, duplicates collapsed, shown chronologically. Recency alone drowned
@@ -332,7 +367,10 @@ low) showed:
    new additive auto-migration (`database.add_missing_columns`: missing
    columns are ALTERed in, so deploys keep the world), numbers tuned
    with `tools/simulate.py` (see §3 Economy).
-2. Conversation engine with template lines — no LLM needed.
+2. ~~Conversation engine with template lines.~~ ✅ 2026-10-16 (see §3
+   Conversations). All buying now happens in trade conversations. Sim:
+   ~15 conversations per in-game day → with an LLM ≈ 40 line calls + 30
+   replan calls per in-game day.
 3. Claude integration: `backend/llm/claude.py` on the official `anthropic`
    SDK (structured outputs; the OpenAI-compatible client stays for LM
    Studio / the 1080 Ti, picked by env var; key from a gitignored `.env`

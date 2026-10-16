@@ -19,6 +19,8 @@ def main() -> None:
     ap.add_argument("--days", type=float, default=14, help="in-game days to run")
     ap.add_argument("--hourly", action="store_true",
                     help="also print everyone's most common state per hour of day")
+    ap.add_argument("--transcripts", type=int, default=0, metavar="N",
+                    help="also print the last N conversations line by line")
     ap.add_argument("--db", help="DB file to use (default: a fresh temp file)")
     args = ap.parse_args()
 
@@ -33,7 +35,7 @@ def main() -> None:
 
     from backend.agents.loader import load_agents_from_json
     from backend.config import TICKS_PER_DAY
-    from backend.database import AgentState, SessionLocal, init_db
+    from backend.database import AgentState, Conversation, SessionLocal, init_db
     from backend.sim.tick_engine import run_tick
 
     init_db()
@@ -71,14 +73,16 @@ def main() -> None:
                 daily[day][n]["starving_min"] += 1
             if r["action"] == "EAT":
                 daily[day][n]["meals"] += 1
+            if r["status"] == "talking":
+                daily[day][n]["talking_min"] += 1
             if detail.startswith("set off to"):
                 daily[day][n]["errands"] += 1
-            if r["action"] == "TRADE" and detail.startswith("bought"):
-                _, qty, item, _, seller, *_ = detail.split(" ", 5)
-                f = flows[(item, seller, n)]
-                f[0] += 1
-                f[1] += int(qty)
-                f[2] += -int(r.get("copper_change", 0))
+            for tr in r.get("trades", []):
+                if tr["copper_change"] < 0:          # count each deal once, on the buyer's side
+                    f = flows[(tr["item"], tr["seller"], tr["buyer"])]
+                    f[0] += 1
+                    f[1] += tr["quantity"]
+                    f[2] += -tr["copper_change"]
             if r["action"] == "WORK" and not detail.startswith(("working", "produced")):
                 work_events[(n, detail.split(" at ")[0])] += 1
             if r["action"] == "OBSERVE" and detail.startswith(("no path", "nothing planned", "wanted")):
@@ -132,6 +136,48 @@ def main() -> None:
             errands[n] += daily[day][n]["errands"]
     print("urgent errands (left the schedule to buy):", dict(errands) or "none")
     print("stuck / no path:", dict(problems) or "none")
+
+    talking = Counter()
+    for day in daily:
+        for n in daily[day]:
+            talking[n] += daily[day][n]["talking_min"]
+    days = max(1, max(snapshots))
+    print("\nminutes spent talking per day:",
+          {n: round(talking[n] / days) for n in names})
+
+    session = SessionLocal()
+    try:
+        convos = session.query(Conversation).order_by(Conversation.id).all()
+        people = {a.id: a.name for a in session.query(AgentState)}
+    finally:
+        session.close()
+    print(f"conversations: {len(convos)} ({len(convos) / days:.1f}/day)")
+    by_reason = defaultdict(list)
+    for c in convos:
+        by_reason[c.reason].append(c)
+    for reason, cs in sorted(by_reason.items()):
+        lines = [len(c.lines or []) for c in cs]
+        deals = sum(len(c.deals or []) for c in cs)
+        ends = Counter(c.end_reason for c in cs)
+        print(f"  {reason:<11} {len(cs):>4}  avg {sum(lines) / len(lines):.1f} lines "
+              f"(max {max(lines)})  deals {deals:>4}  ended: {dict(ends)}")
+    llm_lines = sum(len(c.lines or []) for c in convos) / days
+    print(f"  -> with an LLM speaker that would be ~{llm_lines:.0f} line calls "
+          f"+ ~{2 * len(convos) / days:.0f} replan calls per in-game day")
+
+    for c in convos[-args.transcripts:] if args.transcripts else []:
+        print(f"\n#{c.id} {people[c.a_id]} -> {people[c.b_id]} at {c.place} "
+              f"({c.reason}, {c.end_reason})")
+        for line in c.lines or []:
+            extra = ""
+            if line.get("offer"):
+                o = line["offer"]
+                extra += f"  [offer: {o['kind']} {o['quantity']} {o['item']} for {o['price']}c]"
+            if line.get("response"):
+                extra += f"  [{line['response']}]"
+            if line.get("note"):
+                extra += f"  [{line['note']}]"
+            print(f"  {line['speaker']}: {line['text']}{extra}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import logging
 
-from sqlalchemy import create_engine, inspect, text, Column, String, Float, Integer, JSON, DateTime
+from sqlalchemy import (create_engine, inspect, text, Column, String, Float, Integer,
+                        JSON, DateTime, UniqueConstraint)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -47,6 +48,47 @@ class TickHistory(Base):
     dialogue = Column(String)
     gold_change = Column(Float, default=0.0)  # in copper (name predates the copper economy)
     created_at = Column(DateTime, default=datetime.now)
+
+
+class Conversation(Base):
+    """A 1:1 conversation, one line per tick (backend/sim/conversation.py).
+
+    `a_id` started it for `reason` (trade | appointment | news | chat), with
+    details in `topic`. `lines` is the transcript: [{"tick", "speaker",
+    "text", "offer", "response"}]. `pending_offer` is the latest unanswered
+    offer {"by", "kind": "buy"|"sell", "item", "quantity", "price"};
+    `deals` the trades it settled.
+    """
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    a_id = Column(String)
+    b_id = Column(String)
+    place = Column(String)
+    reason = Column(String)
+    topic = Column(JSON, default=dict)
+    started_tick = Column(Integer)
+    ended_tick = Column(Integer, nullable=True)
+    status = Column(String, default="active")   # active | ended
+    end_reason = Column(String, nullable=True)
+    next_speaker_id = Column(String)
+    lines = Column(JSON, default=list)
+    pending_offer = Column(JSON, nullable=True)
+    deals = Column(JSON, default=list)
+
+
+class Relationship(Base):
+    """How `agent_id` feels about `other_id` — one row per direction, since
+    A liking B says nothing about B liking A. `last_talk_tick` drives the
+    per-pair conversation cooldown."""
+    __tablename__ = "relationships"
+    __table_args__ = (UniqueConstraint("agent_id", "other_id"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id = Column(String)
+    other_id = Column(String)
+    affinity = Column(Integer, default=0)       # -10 (hostile) .. +10 (close)
+    last_talk_tick = Column(Integer, nullable=True)
 
 
 class SimState(Base):
