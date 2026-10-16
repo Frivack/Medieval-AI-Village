@@ -108,6 +108,9 @@ entry per agent, includes `workplace`):
   agent per tick. **If the LLM server is unreachable it falls back to a
   rule-based daily routine** (work by day, inn in the evening, sleep at
   night), so the simulation always runs.
+- **Being replaced** by the hybrid design in §6 (code-driven schedule, LLM
+  only for conversation lines) — don't build new features on the
+  per-tick LLM decision.
 
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
@@ -177,14 +180,16 @@ entry per agent, includes `workplace`):
   adapter changes the MAC and breaks the reservation / SSH.** Don't swap it
   without re-doing the router reservation.
 
-### Deployment — LIVE (since 2026-07-14)
-- Deployed on an **Oracle Cloud instance** (Ubuntu 22.04 x86_64, 1 GB RAM),
-  running as a **systemd service `ai-village`** (registered 2026-07-16:
-  enabled at boot, `Restart=on-failure`, logs append to `~/ai-village.log`).
-  Deploy = `git pull` + `sudo systemctl restart ai-village`.
-- No LLM on that box → the simulation runs on the rule-based fallback.
-  For real LLM behavior set `LLM_BASE_URL` (e.g. Groq) in the environment.
-- **Addresses, SSH access, ports and the restart procedure live in
+### Deployment — currently offline
+- 2026-07-14 → 07-27 the sim ran on a shared Oracle Cloud instance as a
+  systemd service (rule-based only, no LLM). It was shut down there on
+  2026-07-27 to isolate other workloads on that box, and must not go back.
+- Redeploy target: a **dedicated** Oracle Cloud instance (1 GB RAM,
+  Ubuntu 26.04 / Python 3.14), base-hardened 2026-10-15, app not
+  installed yet. Plan: server-driven ticks every 60 s with manual ticks
+  off (§3), the Claude API key in a root-only EnvironmentFile, a dedicated
+  Linux user with systemd sandboxing — stage 5 of the §6 redesign.
+- **Addresses, SSH access, ports and procedures live in
   `CLAUDE.local.md`** (gitignored — this repo is public, so no
   infrastructure details belong in committed files).
 
@@ -212,9 +217,82 @@ Backend world + movement first; frontend after.
 6. ~~**Agent memory**~~ ✅ done (2026-07-16) — observations/conversations
    → `short_term_memory` with importance-weighted prompt selection;
    ChromaDB retrieval as an optional layer (see §3 Memory).
-7. **Frontend polish** — villager selection/detail view (surface
-   `recent_memories` from `/villagers`), day/night tint, smoother
-   movement animation, mobile layout.
+7. **Hybrid AI redesign** — agreed 2026-10-16, next up. Design and build
+   order below. Absorbs the old "villager detail view" polish item.
+8. **Frontend polish, later** — day/night tint, smoother movement
+   animation, mobile layout.
+
+### Hybrid AI redesign (agreed 2026-10-16)
+
+**Why.** A 30-situation comparison (Claude Haiku 5.5 / Sonnet 5.5 / Opus
+5.5 on the real decider + negotiation prompts, structured outputs, effort
+low) showed:
+- Per-tick LLM decisions are the cost driver: ~870 input / ~55 output
+  tokens per call; at one tick per 60 s the upper bound was roughly
+  $21 / $423 / $855 per month.
+- No model ever initiated a TRADE in 22 decisions — the prompt lists no
+  prices or sellers, and nothing in the world consumes goods.
+- Model differences show mostly in dialogue and negotiation, the part
+  visitors actually see.
+
+**Design.**
+- **Behavior is code.** Each agent follows a schedule of time blocks in
+  `AgentState.daily_plan`: `day`, `from`, `to`, `do` (WORK | SOCIAL |
+  SLEEP | VISIT), `at` (building), optional `with` (person → an
+  appointment), `why`. Code lays the job's default routine each day and
+  executes the current block every tick; urgent needs (hunger) override
+  the schedule. Replaces the per-tick LLM call in `decider.decide()`.
+- **Economy loop.** Hunger (2–3 meals a day, buy food when out); cooking
+  consumes wheat; farming_tools wear out with WORK (no tool → no
+  farming); the Merchant buys surpluses and sells where stock is short
+  (Farm → Market → Inn round). Stock thresholds yield "needs" and "for
+  sale". Recipes, wear rates and prices get tuned by offline simulation.
+- **The LLM is used only for conversations,** turn-based: one line per
+  tick, written by the speaker from its own view (own profile, memories,
+  affinity toward the partner in words, the usual price list, transcript,
+  pending offer). Output (JSON schema): `line`, `end`, `offer`
+  {sell|buy, item, quantity, price} (a counter is a new offer),
+  `response` accept|reject. Accept settles at once through the existing
+  TRADE core (stock/funds checks, 70–130% clamp). Max 8 lines; an
+  unanswered offer lapses.
+- **Conversation start is code:** 1:1, same building, both awake, not
+  already talking, per-pair cooldown (~2 in-game hours). The initiator
+  carries a reason into its first line: trade (needs what the other
+  sells), appointment, news (an unshared memory of importance ≥ 2), or
+  chat (chance during SOCIAL blocks).
+- **After a conversation, each participant gets one replan call** (built
+  as a reusable "replan on event"): it first judges whether anything
+  requires a schedule change, then returns ≤ 3 ops (insert / cancel /
+  move), a one-line memory with importance 1–3, and an affinity change
+  (−2..+2). Code validates ops: real places and people, 5-minute grid,
+  horizon = end of tomorrow, an inserted block wins and splits overlaps,
+  ≤ 5 appointments per agent. Only a 6-hour sleep floor is guaranteed —
+  the AI may shorten or skip WORK, and the economy makes them pay.
+- **No LLM → templates.** Template lines offer and accept at base price
+  and replan changes nothing, so the village still runs.
+- **Data model.** Needs columns on `AgentState`, a `Relationship` table
+  (pair affinity, last talk tick), a `Conversation` table (participants,
+  lines, offers, outcome), schedule in `daily_plan`. `create_all` doesn't
+  add columns to existing tables → reset `data/village.db`.
+- **Frontend.** Speech bubbles over speakers (and villagers spread out
+  inside buildings instead of overlapping), a live "talking now" panel
+  that grows one line per tick with offer chips; then a scene-grouped
+  log and a villager detail view (schedule timeline incl. the AI's `why`,
+  needs, relationships, memories).
+
+**Build order** — every stage runs and gets committed on its own:
+0. Record this design.
+1. a) Schedule-driven behavior + data model. b) Economy loop, numbers
+   tuned by a fast offline simulation (nobody starves or goes broke).
+2. Conversation engine with template lines — no LLM needed.
+3. Claude integration: `backend/llm/claude.py` on the official `anthropic`
+   SDK (structured outputs; the OpenAI-compatible client stays for LM
+   Studio / the 1080 Ti, picked by env var; key from a gitignored `.env`
+   locally, a root-only EnvironmentFile on the server). Re-run the model
+   comparison on the real conversation prompts and choose the model then.
+4. Frontend: bubbles + live panel first.
+5. Deploy to a dedicated instance: server-driven ticks every 60 s, manual
+   ticks off.
 
 ---
 
@@ -234,8 +312,6 @@ Backend world + movement first; frontend after.
 - **Driving `ssh` from Windows PowerShell mangles quotes**: inner double
   quotes in the remote command get stripped by PowerShell 5.1 argument
   parsing. Prefer remote commands that need no nested quoting.
-- The deployment box has a **pending kernel upgrade** — rebooting is safe
-  now that the app is a systemd service (auto-starts since 2026-07-16).
 - **On the Windows dev PC, ticks are slow when LM Studio is off**: the
   firewall silently drops connects to the closed port 1234, so every LLM
   attempt burns the full `LLM_CONNECT_TIMEOUT` (2 s) instead of failing
