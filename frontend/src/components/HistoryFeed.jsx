@@ -2,8 +2,8 @@ import { tickToClock } from "../clock.js";
 import { formatCopper } from "../currency.js";
 
 // The interesting events: dialogue lines and money changing hands.
-// MOVE/WORK/REST spam is filtered client-side to keep the feed readable.
-const QUIET_ACTIONS = new Set(["MOVE", "REST", "OBSERVE", "WORK"]);
+// MOVE/WORK/REST/EAT spam is filtered client-side to keep the feed readable.
+const QUIET_ACTIONS = new Set(["MOVE", "REST", "OBSERVE", "WORK", "EAT"]);
 
 export default function HistoryFeed({ history, nameById, minutesPerTick }) {
   const rows = history.filter(

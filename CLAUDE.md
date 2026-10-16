@@ -71,22 +71,38 @@ entry per agent, includes `workplace`):
   buildings with walls/floor/door). `GET /map` serializes it.
 - **A\* pathfinding:** `backend/world/pathfinding.py`, 4-directional,
   agents move **1 tile per tick**; remaining path is stored on the agent row.
-- **Structured actions:** `MOVE`, `WORK`, `TALK`, `TRADE`, `REST`, `OBSERVE`
-  executed in `backend/sim/tick_engine.py`. TRADE v1 is buyer-initiated at
-  fixed base prices (`backend/sim/prices.py`): validates partner presence,
-  seller stock and buyer funds, then settles items + copper atomically and
-  records both sides in `TickHistory` (`gold_change` column, value in
-  copper). During SOCIAL blocks guests buy a meal from the innkeeper on
-  minute-0 ticks (a stand-in until hunger arrives in stage 1b).
-- **TRADE v2 negotiation** (`backend/sim/negotiation.py`, since
-  2026-07-16): single-tick, max two LLM calls — seller reacts to the
-  base-price offer (accept/counter/refuse, personality + memories about
-  this buyer/item in the prompt), buyer reacts to a counter. Counters
-  are clamped to 70–130% of base so a hallucinating model can't wreck
-  the economy; any LLM failure resolves to accepting the base price
-  (= v1), so the rule-based fallback is unaffected. Negotiation lines
-  land in `TickHistory.dialogue` and show in the frontend log;
-  refusals become OBSERVE + an importance-2 memory on both sides.
+- **Actions** (`ActionType`): `MOVE`, `WORK`, `TALK`, `TRADE`, `REST`,
+  `EAT`, `OBSERVE`, executed in `backend/sim/tick_engine.py`. Trades are
+  buyer-initiated and settle goods + copper atomically, both sides recorded
+  in `TickHistory` (`gold_change` column, value in copper).
+- **TRADE v2 negotiation** (`backend/sim/negotiation.py`, 2026-07-16):
+  LLM seller/buyer reactions with counters clamped to 70–130% of base.
+  **Parked since stage 1b** — trades are priced by the economy rules
+  below; stages 2–3 fold negotiation into conversation offers.
+- **Economy** (`backend/sim/economy.py`, stage 1b, since 2026-10-16) —
+  rules and tuned numbers in one file, pure functions:
+  - *Hunger* grows 8/h awake, 3/h asleep; at 50 a villager eats a carried
+    meal (−50). Everyone tops up to 3 meals when food is on sale nearby,
+    in practice on arriving at the Inn in the evening.
+  - *Production*, once per in-game hour of WORK: Farmer → 1 wheat (needs a
+    farming tool; 2 wear per batch, ~8 days per tool), Blacksmith → 1
+    farming_tools, Innkeeper → 2 food from 1 wheat. Producers stop at a
+    store cap (wheat 20, tools 3, food 16) — a full store also stops tool
+    wear.
+  - *Who sells where:* producers only at their own workplace, the Merchant
+    anywhere. Never sold: own 3 meals, the innkeeper's cooking wheat, the
+    farmer's spare tool.
+  - *Prices* (`prices.py` base): the Merchant buys stock wholesale (×0.8)
+    and sells retail (×1.2); everything else at base. Money is conserved,
+    so the flows must balance: food spend = tool spend = 0.4 × wheat base
+    × wheat volume (derivation in `economy.py`). Tuned with
+    `tools/simulate.py`: wheat 10→15c, tool wear 2/batch; 28 days end
+    within ±6c/day for everyone except one-off effects of starting stock.
+  - *Tick order:* hunger → walk → eat → buy what's wanted from someone
+    here → urgent errand (hungry with no food, broken tool: go where it's
+    sold, if someone awake sells it) → schedule block.
+  - State: `AgentState.needs` JSON (`hunger`, `tool`), defaults via
+    `economy.needs_of()` for NULL rows; shown as gauges on the cards.
 - **Time:** **1 tick = 1 in-game minute** (60 ticks/hour, 1440/day, since
   2026-10-16); day/hour/minute derived from `SimState.tick`. With one tick
   per 60 real seconds the village runs at real-time speed. History:
@@ -95,7 +111,9 @@ entry per agent, includes `workplace`):
   daily routine — now it's 48 minutes (Smithy 36, Market 31). WORK yields
   its product once per in-game hour (on the minute-0 tick).
   `POST /tick?count=N` advances up to one day per call; `GET /time`,
-  `GET /history` for inspection. Nothing hard-codes the scale outside
+  `GET /history` for inspection (`notable=true` filters to trades and
+  dialogue server-side — at 1 min/tick the latest 50 raw rows only cover
+  ~12 minutes, so client-side filtering left the log empty). Nothing hard-codes the scale outside
   `backend/config.py`: `GET /status` reports `minutes_per_tick` and the
   frontend's `clock.js` / tick buttons use it.
 - **Schedules** (`backend/sim/schedule.py`, stage 1a, since 2026-10-16):
@@ -104,11 +122,14 @@ entry per agent, includes `workplace`):
   (WORK | SOCIAL | SLEEP | VISIT), `at`, `with`, `why`, `source` (routine
   | ai). `ensure()` lays the job's routine for today and tomorrow in the
   gaps AI blocks leave and drops finished blocks; `insert()` adds a block
-  that wins and splits whatever it overlaps. Routines: Farmer, Blacksmith,
-  Merchant WORK 06–18 at the workplace, SOCIAL 18–22 at the Inn, SLEEP
-  22–06 at home (= the workplace for now); Innkeeper WORK 06–22, SLEEP
-  22–06. The tick engine executes the current block each tick (walk to
-  its place first); `GET /villagers` includes it as `activity`.
+  that wins and splits whatever it overlaps. Routines: Farmer, Blacksmith
+  WORK 06–18 at the workplace, SOCIAL 18–22 at the Inn, SLEEP 22–06 at
+  home (= the workplace for now); Merchant VISIT Farm 06–09 (buy wheat),
+  WORK at the Market 09–18, SOCIAL at the Inn 18–22 (sells it there);
+  Innkeeper WORK 06–22, SLEEP 22–06. The tick engine executes the current
+  block each tick (walk to its place first); `GET /villagers` includes it
+  as `activity`. Days already laid keep the routine they were laid with —
+  a routine change shows up from the next unlaid day.
 - **Who advances time** (`backend/sim/runner.py`, since 2026-10-15):
   `TICK_INTERVAL_SECONDS > 0` starts a background loop in the FastAPI
   lifespan — one tick every N real seconds, fixed rate with no catch-up
@@ -125,12 +146,11 @@ entry per agent, includes `workplace`):
 - `backend/llm/client.py` — OpenAI-compatible `/chat/completions` via httpx.
   Endpoint/model come from env vars (`LLM_BASE_URL`, `LLM_MODEL`); defaults
   to LM Studio at `http://localhost:1234/v1` (see `backend/config.py`).
-- Its only caller today is TRADE v2 negotiation. The per-tick LLM
-  decision (`backend/sim/decider.py`) was **removed in stage 1a**
-  (2026-10-16): behavior now comes from schedules, and the LLM returns
-  for conversations in stages 2–3 of the §6 redesign. If the LLM is
-  unreachable, negotiation falls back to the base price, so the
-  simulation always runs.
+- **No LLM is called during a tick right now.** The per-tick decider was
+  removed in stage 1a and negotiation parked in 1b (2026-10-16); behavior
+  comes from schedules + economy rules, and the LLM returns for
+  conversations in stages 2–3 of the §6 redesign. The client is kept for
+  that.
 
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
@@ -141,8 +161,9 @@ entry per agent, includes `workplace`):
 - **Short-term memory:** every notable event is written to
   `AgentState.short_term_memory` (ring buffer, newest 50) by
   `_remember()` in the tick engine — arrivals, TALK dialogue (both
-  sides, importance 2), TRADE settlements (both sides, importance 3),
-  hourly WORK output (importance 1).
+  sides, importance 2), trades (both sides: wheat/tools importance 3,
+  routine food purchases 1), a broken farming tool (2), hourly WORK
+  output (importance 1).
 - **Prompt selection** (`memory_lines` in `backend/memory/selection.py`,
   moved out of the old decider): top-8 by `importance × 6 in-game hours −
   age`, duplicates collapsed, shown chronologically. Recency alone drowned
@@ -291,10 +312,11 @@ low) showed:
   the AI may shorten or skip WORK, and the economy makes them pay.
 - **No LLM → templates.** Template lines offer and accept at base price
   and replan changes nothing, so the village still runs.
-- **Data model.** Needs columns on `AgentState`, a `Relationship` table
+- **Data model.** `AgentState.needs` (JSON), a `Relationship` table
   (pair affinity, last talk tick), a `Conversation` table (participants,
-  lines, offers, outcome), schedule in `daily_plan`. `create_all` doesn't
-  add columns to existing tables → reset `data/village.db`.
+  lines, offers, outcome), schedule in `daily_plan`. New tables come from
+  `create_all`, new columns from `database.add_missing_columns` (additive
+  only) — no world reset needed.
 - **Frontend.** Speech bubbles over speakers (and villagers spread out
   inside buildings instead of overlapping), a live "talking now" panel
   that grows one line per tick with offer chips; then a scene-grouped
@@ -306,8 +328,10 @@ low) showed:
 1. a) ~~Schedule-driven behavior.~~ ✅ 2026-10-16 — needed no schema
    change (`daily_plan` already existed); the time scale moved to
    1 min/tick on the way (see §3 Time), which reset the local world.
-   b) Economy loop + the data model it needs, numbers tuned with
-   `tools/simulate.py` (nobody starves or goes broke).
+   b) ~~Economy loop.~~ ✅ 2026-10-16 — `needs` JSON column added by the
+   new additive auto-migration (`database.add_missing_columns`: missing
+   columns are ALTERed in, so deploys keep the world), numbers tuned
+   with `tools/simulate.py` (see §3 Economy).
 2. Conversation engine with template lines — no LLM needed.
 3. Claude integration: `backend/llm/claude.py` on the official `anthropic`
    SDK (structured outputs; the OpenAI-compatible client stays for LM

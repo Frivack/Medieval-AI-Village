@@ -1,16 +1,19 @@
 # backend/sim/tick_engine.py
-# Advances the world by one tick (= 1 in-game minute).
-# Per agent: continue an in-progress move (1 tile per tick), otherwise
-# do what the agent's schedule says for this minute (backend/sim/schedule.py),
-# walking to the block's place first if needed. No LLM call here.
-from backend.config import SHORT_TERM_MEMORY_LIMIT
+# Advances the world by one tick (= 1 in-game minute). Per agent, in order:
+#   1. hunger grows (slower while asleep)
+#   2. walking somewhere -> take the next step (1 tile per tick)
+#   3. hungry and carrying food -> eat it
+#   4. someone here sells what I want -> buy it
+#   5. an urgent need (hungry with no food, broken tool) -> go where it's sold
+#   6. otherwise the schedule (backend/sim/schedule.py): walk to the
+#      block's place, then do what it says
+# No LLM call here: rules and prices come from backend/sim/economy.py.
+from backend.config import MINUTES_PER_TICK, SHORT_TERM_MEMORY_LIMIT
 from backend.database import SessionLocal, AgentState, TickHistory, SimState
 from backend.memory.store import memory_store
-from backend.sim import schedule
-from backend.sim.actions import ActionType, JOB_PRODUCT
+from backend.sim import economy, schedule
+from backend.sim.actions import ActionType
 from backend.sim.clock import game_time  # re-exported for main.py
-from backend.sim.negotiation import negotiate
-from backend.sim.prices import price_of
 from backend.utils.currency import to_string
 from backend.world.map import village_map
 from backend.world.pathfinding import find_path
@@ -64,7 +67,8 @@ def run_tick() -> dict:
                     gold_change=seller_side["copper_change"],
                 ))
             results.append({"agent": agent.name, "location": agent.location,
-                            "status": agent.status, **entry})
+                            "status": agent.status,
+                            "hunger": (agent.needs or {}).get("hunger"), **entry})
 
         db.commit()
         return {**time, "results": results}
@@ -74,26 +78,48 @@ def run_tick() -> dict:
 
 def _step_agent(db, agent, all_agents, time: dict) -> dict:
     tick = time["tick"]
-    # 1) Already walking somewhere → take the next step (1 tile per tick).
+    # 1) Hunger grows every tick, walking or not. Reassigning (rather than
+    #    mutating) the JSON column is what makes SQLAlchemy save it.
+    needs = economy.grow_hunger(economy.needs_of(agent.job, agent.needs),
+                                asleep=agent.status == "resting",
+                                minutes=MINUTES_PER_TICK)
+    agent.needs = needs
+
+    # 2) Already walking somewhere → take the next step.
     if agent.path:
         return _advance_along_path(agent, tick)
 
-    # 2) What does the schedule say for this minute? ensure() lays the
-    #    job's routine for today/tomorrow first if this is a new day.
+    # 3) Hungry and carrying food → eat it, wherever we are.
+    if economy.should_eat(needs, agent.inventory or {}):
+        agent.needs, agent.inventory = economy.eat(needs, agent.inventory or {})
+        agent.status = "eating"
+        return {"action": ActionType.EAT.value, "detail": f"ate a meal at {agent.location}"}
+
+    # 4) Someone here sells what I want → buy it.
+    bought = _shop(agent, all_agents, needs, tick)
+    if bought:
+        return bought
+
+    # 5) An urgent need outranks the schedule: go where it's sold.
+    errand = _errand(agent, all_agents, needs)
+    if errand and errand[0] != agent.location:
+        place, item = errand
+        result = _start_move(agent, place, tick)
+        result["detail"] = f"set off to {place} to buy {item}"
+        return result
+
+    # 6) The schedule: what does this minute's block say?
     plan = schedule.ensure(agent.daily_plan, agent.job, agent.workplace, tick)
     if plan != agent.daily_plan:
-        agent.daily_plan = plan  # reassign so SQLAlchemy notices the JSON change
+        agent.daily_plan = plan
     block = schedule.current(plan, tick)
     if block is None:  # the routine covers every minute; only a broken plan gets here
         agent.status = "idle"
         return {"action": ActionType.OBSERVE.value,
                 "detail": f"nothing planned at {agent.location}"}
-
-    # 3) Wrong place → set off; the following ticks continue via step 1.
     if agent.location != block["at"]:
         return _start_move(agent, block["at"], tick)
 
-    # 4) Right place → do what the block says.
     agent.talking_to = None
     if block["do"] == schedule.WORK:
         return _do_work(agent, time)
@@ -101,11 +127,86 @@ def _step_agent(db, agent, all_agents, time: dict) -> dict:
         agent.status = "resting"
         return {"action": ActionType.REST.value, "detail": f"sleeping at {agent.location}"}
     if block["do"] == schedule.SOCIAL:
-        return _socialize(agent, all_agents, time)
+        agent.status = "socializing"
+        return {"action": ActionType.OBSERVE.value,
+                "detail": f"spending the evening at {agent.location}"}
     # VISIT: wait there (stage 2 starts the appointment's conversation).
     agent.status = "visiting"
     who = f" for {block['with']}" if block["with"] else ""
-    return {"action": ActionType.OBSERVE.value, "detail": f"waiting at {agent.location}{who}"}
+    why = f" to {block['why']}" if block["why"] else ""
+    return {"action": ActionType.OBSERVE.value,
+            "detail": f"visiting {agent.location}{who}{why}"}
+
+
+def _sellers_here(agent, all_agents):
+    """Agents who could trade with `agent` right now: same building,
+    standing still, awake."""
+    if agent.location not in village_map.buildings:
+        return []
+    return [s for s in all_agents
+            if s.id != agent.id and s.location == agent.location
+            and not s.path and s.status != "resting"]
+
+
+def _shop(agent, all_agents, needs: dict, tick: int):
+    """Buy the most important thing on the agent's wish list that someone
+    here sells, as many as wanted / on offer / affordable. None if nothing."""
+    sellers = _sellers_here(agent, all_agents)
+    if not sellers:
+        return None
+    for item, wanted in economy.wants(agent.job, agent.inventory or {}, needs).items():
+        offers = []
+        for s in sellers:
+            on_offer = economy.for_sale(s.job, s.workplace, s.location, s.inventory or {}).get(item, 0)
+            if on_offer:
+                offers.append((economy.unit_price(item, agent.job, s.job), on_offer, s))
+        if not offers:
+            continue
+        price, on_offer, seller = min(offers, key=lambda o: o[0])   # cheapest seller here
+        quantity = min(wanted, on_offer, agent.wealth // price)
+        if quantity >= 1:
+            return _settle(agent, seller, item, quantity, price * quantity, tick)
+    return None
+
+
+def _errand(agent, all_agents, needs: dict):
+    """(place, item) to go to for an urgent need, if anyone awake sells
+    it somewhere right now and the agent can afford it; else None."""
+    item = economy.urgent(agent.job, agent.inventory or {}, needs)
+    if item is None:
+        return None
+    for s in all_agents:
+        if s.id == agent.id or s.path or s.status == "resting":
+            continue
+        if s.location not in village_map.buildings:
+            continue
+        if not economy.for_sale(s.job, s.workplace, s.location, s.inventory or {}).get(item):
+            continue
+        if agent.wealth >= economy.unit_price(item, agent.job, s.job):
+            return s.location, item
+    return None
+
+
+def _settle(buyer, seller, item: str, quantity: int, total: int, tick: int) -> dict:
+    """Move goods and copper both ways. Callers have checked stock and funds."""
+    buyer.inventory = economy.add_item(buyer.inventory or {}, item, quantity)
+    seller.inventory = economy.add_item(seller.inventory or {}, item, -quantity)
+    buyer.wealth -= total
+    seller.wealth += total
+    buyer.status = "trading"
+    buyer.talking_to = None
+    # Buying the daily meals is routine; a deal over wheat or tools is news.
+    importance = 1 if item == "food" else 3
+    _remember(buyer, tick, f"I bought {quantity} {item} from {seller.name} for {to_string(total)}.",
+              importance)
+    _remember(seller, tick, f"I sold {quantity} {item} to {buyer.name} for {to_string(total)}.",
+              importance)
+    return {
+        "action": ActionType.TRADE.value,
+        "detail": f"bought {quantity} {item} from {seller.name} for {to_string(total)}",
+        "copper_change": -total,
+        "seller_side": {"agent_id": seller.id, "copper_change": total},
+    }
 
 
 def _advance_along_path(agent, tick: int) -> dict:
@@ -142,112 +243,18 @@ def _start_move(agent, target, tick: int) -> dict:
 
 def _do_work(agent, time: dict) -> dict:
     agent.status = "working"
-    agent.talking_to = None
-    product = JOB_PRODUCT.get(agent.job)
-    # Output rate is 1 item per in-game hour, not per tick: only the
-    # on-the-hour tick (minute == 0) yields the finished product.
-    if product and time["minute"] == 0:
-        inventory = dict(agent.inventory or {})
-        inventory[product] = inventory.get(product, 0) + 1
-        agent.inventory = inventory
-        _remember(agent, time["tick"], f"I produced 1 {product} at {agent.location}.")
-        return {"action": ActionType.WORK.value,
-                "detail": f"produced 1 {product} at {agent.location}"}
-    return {"action": ActionType.WORK.value,
-            "detail": f"working at {agent.location}"}
-
-
-def _socialize(agent, all_agents, time: dict) -> dict:
-    """An evening at the inn. Until hunger arrives (stage 1b), guests buy a
-    meal from the innkeeper once an hour, on the minute-0 tick."""
-    innkeeper = next((a for a in all_agents
-                      if a.job == "Innkeeper" and a.id != agent.id
-                      and a.location == agent.location), None)
-    if innkeeper and time["minute"] == 0:
-        return _do_trade(agent, all_agents,
-                         {"target": innkeeper.name, "item": "food", "quantity": 1},
-                         time["tick"])
-    agent.status = "socializing"
-    return {"action": ActionType.OBSERVE.value,
-            "detail": f"spending the evening at {agent.location}"}
-
-
-def _do_trade(agent, all_agents, decision: dict, tick: int) -> dict:
-    """Buyer-initiated trade: `agent` buys item x quantity from `target`.
-
-    v2: the price comes out of a single-tick negotiation (negotiation.py)
-    seeded with the base price; without an LLM that resolves to the base
-    price, i.e. v1. The settlement itself is unchanged: validate, then
-    move items and copper both ways atomically. Any failed precondition
-    degrades to OBSERVE, like _start_move.
-    """
-    target_name = decision.get("target")
-    item = decision.get("item")
-    try:
-        quantity = max(1, int(decision.get("quantity") or 1))
-    except (TypeError, ValueError):
-        quantity = 1
-
-    seller = next((a for a in all_agents
-                   if a.name == target_name and a.location == agent.location
-                   and a.id != agent.id), None)
-    fail = None
-    base_total = None
-    if seller is None:
-        fail = f"wanted to buy from {target_name}, but they're not here"
-    elif (base_total := price_of(item, quantity)) is None:
-        fail = f"wanted to buy unknown item '{item}'"
-    elif (seller.inventory or {}).get(item, 0) < quantity:
-        fail = f"{seller.name} has no {item} to sell"
-    if fail:
-        agent.status = "observing"
-        agent.talking_to = None
-        return {"action": ActionType.OBSERVE.value, "detail": fail}
-
-    deal = negotiate(agent, seller, item, quantity, base_total)
-    dialogue = " / ".join(deal["dialogue"]) or None
-    if deal["outcome"] == "refuse":
-        _remember(agent, tick,
-                  f"{seller.name} refused to sell me {quantity} {item}.", importance=2)
-        _remember(seller, tick,
-                  f"I refused to sell {quantity} {item} to {agent.name}.", importance=2)
-        agent.status = "observing"
-        agent.talking_to = None
-        return {"action": ActionType.OBSERVE.value, "dialogue": dialogue,
-                "detail": f"{seller.name} refused to sell {item}"}
-
-    # The buyer's funds are checked against the NEGOTIATED price, not the
-    # base price — a counter-offer can push the total above their purse.
-    total = deal["price"]
-    if agent.wealth < total:
-        agent.status = "observing"
-        agent.talking_to = None
-        return {"action": ActionType.OBSERVE.value, "dialogue": dialogue,
-                "detail": f"can't afford {quantity} {item} ({to_string(total)})"}
-
-    buyer_inv = dict(agent.inventory or {})
-    buyer_inv[item] = buyer_inv.get(item, 0) + quantity
-    agent.inventory = buyer_inv
-    seller_inv = dict(seller.inventory)
-    seller_inv[item] -= quantity
-    if seller_inv[item] == 0:
-        del seller_inv[item]
-    seller.inventory = seller_inv
-    agent.wealth -= total
-    seller.wealth += total
-
-    agent.status = "trading"
-    agent.talking_to = None
-    _remember(agent, tick,
-              f"I bought {quantity} {item} from {seller.name} for {to_string(total)}.",
-              importance=3)
-    _remember(seller, tick,
-              f"I sold {quantity} {item} to {agent.name} for {to_string(total)}.",
-              importance=3)
-    return {
-        "action": ActionType.TRADE.value,
-        "dialogue": dialogue,
-        "detail": f"bought {quantity} {item} from {seller.name} for {to_string(total)}",
-        "copper_change": -total,
-        "seller_side": {"agent_id": seller.id, "copper_change": total},
-    }
+    # Output comes once per in-game hour of work, on the minute-0 tick.
+    if time["minute"] != 0:
+        return {"action": ActionType.WORK.value, "detail": f"working at {agent.location}"}
+    inventory, needs, event = economy.produce(
+        agent.job, agent.inventory or {}, economy.needs_of(agent.job, agent.needs))
+    agent.inventory, agent.needs = inventory, needs
+    if event is None:   # nothing to make (the merchant tends his stall)
+        return {"action": ActionType.WORK.value, "detail": f"working at {agent.location}"}
+    if event.startswith("produced"):
+        item = event.split(";")[0].removeprefix("produced ")
+        _remember(agent, time["tick"], f"I produced {item} at {agent.location}.")
+    if event.endswith("the tool broke"):
+        _remember(agent, time["tick"],
+                  "My farming tools broke; I can't work the fields without new ones.", 2)
+    return {"action": ActionType.WORK.value, "detail": f"{event} at {agent.location}"}

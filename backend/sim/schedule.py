@@ -15,15 +15,18 @@ from backend.sim.clock import format_clock, game_time, tick_at
 WORK, SOCIAL, SLEEP, VISIT = "WORK", "SOCIAL", "SLEEP", "VISIT"
 ROUTINE, AI = "routine", "ai"
 
-# Daily template per job: (from_hour, to_hour, activity, place). "work" is
-# the agent's workplace, "home" where they sleep - for now the workplace
-# itself (farmhouse, smithy, market stall, inn). A to_hour <= from_hour
-# runs past midnight into the next day.
+# Daily template per job: (from_hour, to_hour, activity, place[, why]).
+# "work" is the agent's workplace, "home" where they sleep - for now the
+# workplace itself (farmhouse, smithy, market stall, inn). A to_hour <=
+# from_hour runs past midnight into the next day.
 _DAY_JOB = [(6, 18, WORK, "work"), (18, 22, SOCIAL, "Inn"), (22, 6, SLEEP, "home")]
 ROUTINES = {
     "Farmer": _DAY_JOB,
     "Blacksmith": _DAY_JOB,
-    "Merchant": _DAY_JOB,
+    # The merchant's trading round: buy wheat at the Farm in the morning
+    # (67 min walk from the Market), mind the stall, sell at the Inn at night.
+    "Merchant": [(6, 9, VISIT, "Farm", "buy wheat for the inn"),
+                 (9, 18, WORK, "work"), (18, 22, SOCIAL, "Inn"), (22, 6, SLEEP, "home")],
     # The innkeeper's evening IS work: serving the guests.
     "Innkeeper": [(6, 22, WORK, "work"), (22, 6, SLEEP, "home")],
 }
@@ -37,10 +40,10 @@ def routine_blocks(job: str, workplace: str, day: int) -> list[dict]:
     """The job's default blocks for `day` (the last one may end tomorrow)."""
     places = {"work": workplace, "home": workplace}
     blocks = []
-    for from_h, to_h, do, at in ROUTINES[job]:
+    for from_h, to_h, do, at, *why in ROUTINES[job]:
         end_day = day if to_h > from_h else day + 1
         blocks.append(_block(tick_at(day, from_h), tick_at(end_day, to_h),
-                             do, places.get(at, at), day=day))
+                             do, places.get(at, at), why=why[0] if why else None, day=day))
     return blocks
 
 

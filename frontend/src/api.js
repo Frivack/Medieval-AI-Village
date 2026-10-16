@@ -11,7 +11,8 @@ async function getJSON(path) {
 export const fetchMap = () => getJSON("/map");
 export const fetchVillagers = () => getJSON("/villagers");
 export const fetchTime = () => getJSON("/time");
-export const fetchHistory = (limit = 40) => getJSON(`/history?limit=${limit}`);
+// notable=true: trades and dialogue only, filtered server-side (see main.py).
+export const fetchHistory = (limit = 40) => getJSON(`/history?limit=${limit}&notable=true`);
 export const fetchStatus = () => getJSON("/status");
 
 export async function advanceTicks(count = 1) {

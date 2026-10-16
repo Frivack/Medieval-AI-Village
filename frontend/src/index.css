@@ -91,6 +91,12 @@ body {
 .card-row { display: flex; justify-content: space-between; margin-top: 0.25rem; }
 .loc { color: var(--muted); }
 .activity { margin-top: 0.25rem; font-size: 0.7rem; color: var(--muted); }
+.gauges { margin-top: 0.3rem; display: flex; flex-direction: column; gap: 0.15rem; }
+.gauge { display: flex; align-items: center; gap: 0.35rem; font-size: 0.65rem; color: var(--muted); }
+.gauge-label { width: 3.2rem; }
+.gauge-track { flex: 1; height: 0.35rem; background: var(--panel-edge); border-radius: 2px; overflow: hidden; }
+.gauge-fill { display: block; height: 100%; background: var(--green); }
+.gauge-fill.alarm { background: var(--red); }
 .wealth { color: var(--gold); }
 .inventory { margin-top: 0.3rem; display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .item {

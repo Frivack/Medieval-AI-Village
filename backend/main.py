@@ -6,13 +6,14 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.config import (MANUAL_TICK_ENABLED, MINUTES_PER_TICK,
                             TICK_INTERVAL_SECONDS, TICKS_PER_DAY)
 from backend.database import init_db, get_db, AgentState, TickHistory, SimState
 from backend.agents.loader import load_agents_from_json
-from backend.sim import schedule
+from backend.sim import economy, schedule
 from backend.sim.runner import run_tick_locked, tick_loop
 from backend.sim.tick_engine import game_time
 from backend.world.map import village_map
@@ -63,6 +64,7 @@ def get_villagers(db: Session = Depends(get_db)):
             "wealth": a.wealth, "location": a.location,
             "x": a.x, "y": a.y, "status": a.status,
             "inventory": a.inventory,
+            "needs": economy.needs_of(a.job, a.needs),
             "activity": _activity(a.daily_plan, now),
             "recent_memories": (a.short_term_memory or [])[-5:],
         }
@@ -115,11 +117,19 @@ def get_map():
 
 
 @app.get("/history")
-def get_history(limit: int = 50, db: Session = Depends(get_db)):
-    """Recent events, newest first. copper_change is +/- copper for TRADE rows."""
-    rows = (db.query(TickHistory)
-              .order_by(TickHistory.id.desc())
-              .limit(limit).all())
+def get_history(limit: int = 50, notable: bool = False, db: Session = Depends(get_db)):
+    """Recent events, newest first. copper_change is +/- copper for TRADE rows.
+
+    notable=true keeps only trades and dialogue. At 1 min/tick every
+    villager writes a row per minute, so the latest 50 raw rows cover
+    ~12 minutes — filtering after the LIMIT (client-side) left the
+    frontend log empty most of the time.
+    """
+    query = db.query(TickHistory)
+    if notable:
+        query = query.filter(or_(TickHistory.action.in_(("TRADE", "TALK")),
+                                 TickHistory.dialogue.isnot(None)))
+    rows = query.order_by(TickHistory.id.desc()).limit(limit).all()
     return [
         {"tick": r.tick, "agent_id": r.agent_id,
          "action": r.action, "dialogue": r.dialogue,
