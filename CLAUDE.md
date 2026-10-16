@@ -42,6 +42,12 @@ section described work that was never committed.)*
   `TickHistory`, `SimState` (world tick counter).
 - `data/village.db` is runtime state: gitignored, regenerated from
   `data/agents.json` on startup. Delete it to reset the world.
+  `VILLAGE_DB_PATH` points the app at another file (tests, simulator).
+- **Tests:** `python -m pytest` (pytest is in `requirements-dev.txt`;
+  `pytest.ini` sets the repo root on the path). **Offline simulator:**
+  `python tools/simulate.py --days 3` runs the world on a throwaway DB
+  with no LLM and prints everyone's most common state per hour, Inn
+  arrivals, stuck agents and the end-state economy.
 - `.claude/launch.json` holds the dev-server config so Claude Code's
   browser preview can start uvicorn (local port 8000).
   `ai-village-api-live` (port 8001) previews production mode locally:
@@ -70,8 +76,8 @@ entry per agent, includes `workplace`):
   fixed base prices (`backend/sim/prices.py`): validates partner presence,
   seller stock and buyer funds, then settles items + copper atomically and
   records both sides in `TickHistory` (`gold_change` column, value in
-  copper). The rule-based fallback buys a meal from the innkeeper on
-  minute-0 evening ticks at the Inn.
+  copper). During SOCIAL blocks guests buy a meal from the innkeeper on
+  minute-0 ticks (a stand-in until hunger arrives in stage 1b).
 - **TRADE v2 negotiation** (`backend/sim/negotiation.py`, since
   2026-07-16): single-tick, max two LLM calls — seller reacts to the
   base-price offer (accept/counter/refuse, personality + memories about
@@ -81,13 +87,28 @@ entry per agent, includes `workplace`):
   (= v1), so the rule-based fallback is unaffected. Negotiation lines
   land in `TickHistory.dialogue` and show in the frontend log;
   refusals become OBSERVE + an importance-2 memory on both sides.
-- **Time:** **1 tick = 5 in-game minutes** (12 ticks/hour, 288/day);
-  day/hour/minute derived from `SimState.tick`. Chosen because 1 tick =
-  1 hour made 1-tile-per-tick travel absurdly slow (two days to cross
-  the village). WORK yields its product once per in-game hour (on the
-  minute-0 tick); sleeping agents skip re-decisions until 06:00 to save
-  LLM calls. `POST /tick?count=N` advances up to one day per call;
-  `GET /time`, `GET /history` for inspection.
+- **Time:** **1 tick = 1 in-game minute** (60 ticks/hour, 1440/day, since
+  2026-10-16); day/hour/minute derived from `SimState.tick`. With one tick
+  per 60 real seconds the village runs at real-time speed. History:
+  1 h/tick made 1-tile-per-tick travel take two in-game days; 5 min/tick
+  still took 4 hours from the Farm to the Inn (48 tiles), which broke the
+  daily routine — now it's 48 minutes (Smithy 36, Market 31). WORK yields
+  its product once per in-game hour (on the minute-0 tick).
+  `POST /tick?count=N` advances up to one day per call; `GET /time`,
+  `GET /history` for inspection. Nothing hard-codes the scale outside
+  `backend/config.py`: `GET /status` reports `minutes_per_tick` and the
+  frontend's `clock.js` / tick buttons use it.
+- **Schedules** (`backend/sim/schedule.py`, stage 1a, since 2026-10-16):
+  each agent's `daily_plan` is `{"days": [...], "blocks": [...]}`; a block
+  is `start`/`end` (absolute ticks, so SLEEP can cross midnight), `do`
+  (WORK | SOCIAL | SLEEP | VISIT), `at`, `with`, `why`, `source` (routine
+  | ai). `ensure()` lays the job's routine for today and tomorrow in the
+  gaps AI blocks leave and drops finished blocks; `insert()` adds a block
+  that wins and splits whatever it overlaps. Routines: Farmer, Blacksmith,
+  Merchant WORK 06–18 at the workplace, SOCIAL 18–22 at the Inn, SLEEP
+  22–06 at home (= the workplace for now); Innkeeper WORK 06–22, SLEEP
+  22–06. The tick engine executes the current block each tick (walk to
+  its place first); `GET /villagers` includes it as `activity`.
 - **Who advances time** (`backend/sim/runner.py`, since 2026-10-15):
   `TICK_INTERVAL_SECONDS > 0` starts a background loop in the FastAPI
   lifespan — one tick every N real seconds, fixed rate with no catch-up
@@ -104,13 +125,12 @@ entry per agent, includes `workplace`):
 - `backend/llm/client.py` — OpenAI-compatible `/chat/completions` via httpx.
   Endpoint/model come from env vars (`LLM_BASE_URL`, `LLM_MODEL`); defaults
   to LM Studio at `http://localhost:1234/v1` (see `backend/config.py`).
-- `backend/sim/decider.py` asks the LLM for a structured JSON action per
-  agent per tick. **If the LLM server is unreachable it falls back to a
-  rule-based daily routine** (work by day, inn in the evening, sleep at
-  night), so the simulation always runs.
-- **Being replaced** by the hybrid design in §6 (code-driven schedule, LLM
-  only for conversation lines) — don't build new features on the
-  per-tick LLM decision.
+- Its only caller today is TRADE v2 negotiation. The per-tick LLM
+  decision (`backend/sim/decider.py`) was **removed in stage 1a**
+  (2026-10-16): behavior now comes from schedules, and the LLM returns
+  for conversations in stages 2–3 of the §6 redesign. If the LLM is
+  unreachable, negotiation falls back to the base price, so the
+  simulation always runs.
 
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
@@ -123,10 +143,11 @@ entry per agent, includes `workplace`):
   `_remember()` in the tick engine — arrivals, TALK dialogue (both
   sides, importance 2), TRADE settlements (both sides, importance 3),
   hourly WORK output (importance 1).
-- **Prompt selection** (`_memory_lines` in `backend/sim/decider.py`):
-  top-8 by `importance × 72 ticks − age`, duplicates collapsed, shown
-  chronologically. Recency alone drowned a trade under one evening of
-  repeated greetings — that's why importance exists.
+- **Prompt selection** (`memory_lines` in `backend/memory/selection.py`,
+  moved out of the old decider): top-8 by `importance × 6 in-game hours −
+  age`, duplicates collapsed, shown chronologically. Recency alone drowned
+  a trade under one evening of repeated greetings — that's why importance
+  exists. Unused until the stage 3 conversation prompts.
 - **ChromaDB long-term store is OPTIONAL** (`backend/memory/store.py`):
   install `chromadb` on the dev PC only — far too heavy for the 1 GB
   deployment box, which degrades gracefully to a null store. When
@@ -135,7 +156,7 @@ entry per agent, includes `workplace`):
   Kill switch: `VECTOR_MEMORY=0`. First use downloads the MiniLM ONNX
   embedding model (~80 MB) to `~/.cache/chroma/`.
 - In-game clock helpers live in `backend/sim/clock.py` (not
-  tick_engine) so decider can format memory timestamps without a
+  tick_engine) so memory selection and schedules can use them without a
   circular import.
 
 ---
@@ -241,7 +262,7 @@ low) showed:
   SLEEP | VISIT), `at` (building), optional `with` (person → an
   appointment), `why`. Code lays the job's default routine each day and
   executes the current block every tick; urgent needs (hunger) override
-  the schedule. Replaces the per-tick LLM call in `decider.decide()`.
+  the schedule. Replaced the per-tick LLM call of the old decider.
 - **Economy loop.** Hunger (2–3 meals a day, buy food when out); cooking
   consumes wheat; farming_tools wear out with WORK (no tool → no
   farming); the Merchant buys surpluses and sells where stock is short
@@ -281,9 +302,12 @@ low) showed:
   needs, relationships, memories).
 
 **Build order** — every stage runs and gets committed on its own:
-0. Record this design.
-1. a) Schedule-driven behavior + data model. b) Economy loop, numbers
-   tuned by a fast offline simulation (nobody starves or goes broke).
+0. ~~Record this design.~~ ✅ 2026-10-16
+1. a) ~~Schedule-driven behavior.~~ ✅ 2026-10-16 — needed no schema
+   change (`daily_plan` already existed); the time scale moved to
+   1 min/tick on the way (see §3 Time), which reset the local world.
+   b) Economy loop + the data model it needs, numbers tuned with
+   `tools/simulate.py` (nobody starves or goes broke).
 2. Conversation engine with template lines — no LLM needed.
 3. Claude integration: `backend/llm/claude.py` on the official `anthropic`
    SDK (structured outputs; the OpenAI-compatible client stays for LM

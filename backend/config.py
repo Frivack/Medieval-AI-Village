@@ -7,6 +7,12 @@
 import os
 from pathlib import Path
 
+BASE_DIR = Path(__file__).parent.parent  # backend/ -> repo root
+
+# The world's runtime state. VILLAGE_DB_PATH points tests and the offline
+# simulator (tools/simulate.py) at a throwaway file instead of the dev world.
+DB_PATH = Path(os.getenv("VILLAGE_DB_PATH") or BASE_DIR / "data" / "village.db")
+
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "llama3.1-8b")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "not-needed")  # local servers ignore it
@@ -24,16 +30,18 @@ MAP_HEIGHT = 50
 # VECTOR_MEMORY=0 disables ChromaDB even if installed; when chromadb
 # isn't installed at all it degrades to short-term memory automatically.
 VECTOR_MEMORY = os.getenv("VECTOR_MEMORY", "1").lower() not in ("0", "false", "off")
-CHROMA_DIR = Path(__file__).parent.parent / "data" / "chroma"
+CHROMA_DIR = BASE_DIR / "data" / "chroma"
 SHORT_TERM_MEMORY_LIMIT = 50   # newest N entries kept on the agent row
 MEMORIES_IN_PROMPT = 8         # recent memories shown to the LLM
 
-# Time: 1 tick = 5 in-game minutes.
-# (1 tick = 1 hour made travel absurd: crossing the village at
-# 1 tile/tick took two in-game days. At 5 min/tick it's ~4 hours.)
-MINUTES_PER_TICK = 5
-TICKS_PER_HOUR = 60 // MINUTES_PER_TICK   # 12
-TICKS_PER_DAY = TICKS_PER_HOUR * 24       # 288
+# Time: 1 tick = 1 in-game minute. With one tick per 60 real seconds
+# (TICK_INTERVAL_SECONDS=60) the village runs at real-time speed.
+# History: 1 h/tick made 1-tile-per-tick travel take two in-game days;
+# 5 min/tick still took 4 hours from the Farm to the Inn, which broke the
+# daily routine. At 1 min/tick that walk is 48 minutes.
+MINUTES_PER_TICK = 1
+TICKS_PER_HOUR = 60 // MINUTES_PER_TICK   # 60
+TICKS_PER_DAY = TICKS_PER_HOUR * 24       # 1440
 
 # Who advances time (see backend/sim/runner.py).
 # TICK_INTERVAL_SECONDS > 0: the server ticks by itself, one tick every N

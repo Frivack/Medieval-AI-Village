@@ -90,6 +90,7 @@ body {
 .job { color: var(--muted); font-size: 0.72rem; }
 .card-row { display: flex; justify-content: space-between; margin-top: 0.25rem; }
 .loc { color: var(--muted); }
+.activity { margin-top: 0.25rem; font-size: 0.7rem; color: var(--muted); }
 .wealth { color: var(--gold); }
 .inventory { margin-top: 0.3rem; display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .item {

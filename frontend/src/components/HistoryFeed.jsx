@@ -1,10 +1,11 @@
-import { formatCopper, tickToClock } from "../currency.js";
+import { tickToClock } from "../clock.js";
+import { formatCopper } from "../currency.js";
 
 // The interesting events: dialogue lines and money changing hands.
 // MOVE/WORK/REST spam is filtered client-side to keep the feed readable.
 const QUIET_ACTIONS = new Set(["MOVE", "REST", "OBSERVE", "WORK"]);
 
-export default function HistoryFeed({ history, nameById }) {
+export default function HistoryFeed({ history, nameById, minutesPerTick }) {
   const rows = history.filter(
     (r) => !QUIET_ACTIONS.has(r.action) || r.dialogue
   );
@@ -15,7 +16,7 @@ export default function HistoryFeed({ history, nameById }) {
       <ul>
         {rows.map((r, i) => (
           <li key={i} className={`ev ev-${r.action.toLowerCase()}`}>
-            <span className="ev-time">{tickToClock(r.tick)}</span>
+            <span className="ev-time">{tickToClock(r.tick, minutesPerTick)}</span>
             <span className="ev-agent">{nameById[r.agent_id] ?? r.agent_id}</span>
             {r.action === "TRADE" ? (
               <>

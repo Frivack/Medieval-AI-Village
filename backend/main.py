@@ -8,9 +8,11 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
-from backend.config import MANUAL_TICK_ENABLED, TICK_INTERVAL_SECONDS, TICKS_PER_DAY
+from backend.config import (MANUAL_TICK_ENABLED, MINUTES_PER_TICK,
+                            TICK_INTERVAL_SECONDS, TICKS_PER_DAY)
 from backend.database import init_db, get_db, AgentState, TickHistory, SimState
 from backend.agents.loader import load_agents_from_json
+from backend.sim import schedule
 from backend.sim.runner import run_tick_locked, tick_loop
 from backend.sim.tick_engine import game_time
 from backend.world.map import village_map
@@ -53,16 +55,25 @@ def get_villagers(db: Session = Depends(get_db)):
     # by hand leaks the session — under frontend polling that exhausts
     # the connection pool (QueuePool limit reached -> HTTP 500).
     agents = db.query(AgentState).all()
+    sim = db.get(SimState, 1)
+    now = sim.tick if sim else 0
     return [
         {
             "id": a.id, "name": a.name, "job": a.job,
             "wealth": a.wealth, "location": a.location,
             "x": a.x, "y": a.y, "status": a.status,
             "inventory": a.inventory,
+            "activity": _activity(a.daily_plan, now),
             "recent_memories": (a.short_term_memory or [])[-5:],
         }
         for a in agents
     ]
+
+
+def _activity(plan, now: int):
+    """The schedule block in force at `now` (None before the first tick)."""
+    block = schedule.current(plan, now)
+    return schedule.describe(block) if block else None
 
 
 @app.post("/tick")
@@ -82,11 +93,13 @@ def advance_tick(count: int = 1):
 @app.get("/status")
 def get_status():
     """How time advances on this server. The frontend hides the manual
-    tick controls when manual_tick is false."""
+    tick controls when manual_tick is false, and converts ticks to clock
+    times with minutes_per_tick instead of hard-coding the time scale."""
     return {
         "auto_tick": TICK_INTERVAL_SECONDS > 0,
         "tick_interval_seconds": TICK_INTERVAL_SECONDS,
         "manual_tick": MANUAL_TICK_ENABLED,
+        "minutes_per_tick": MINUTES_PER_TICK,
     }
 
 

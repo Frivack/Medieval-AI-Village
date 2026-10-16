@@ -1,0 +1,3 @@
+# Dev-only tools, on top of requirements.txt (not needed on the server).
+-r requirements.txt
+pytest

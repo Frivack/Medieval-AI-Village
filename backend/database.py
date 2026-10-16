@@ -2,7 +2,8 @@ from sqlalchemy import create_engine, Column, String, Float, Integer, JSON, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
-from pathlib import Path
+
+from backend.config import DB_PATH
 
 Base = declarative_base()
 
@@ -51,9 +52,6 @@ class SimState(Base):
     id = Column(Integer, primary_key=True, default=1)
     tick = Column(Integer, default=0)
 
-
-BASE_DIR = Path(__file__).parent.parent  # backend/ → Medieval-AI-Village/
-DB_PATH = BASE_DIR / "data" / "village.db"
 
 engine = create_engine(f"sqlite:///{DB_PATH}")
 SessionLocal = sessionmaker(bind=engine)

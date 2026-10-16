@@ -90,7 +90,8 @@ export default function App() {
         </div>
         <aside className="sidebar">
           <VillagerPanel villagers={villagers} />
-          <HistoryFeed history={history} nameById={nameById} />
+          <HistoryFeed history={history} nameById={nameById}
+                       minutesPerTick={status?.minutes_per_tick} />
         </aside>
       </main>
     </div>
