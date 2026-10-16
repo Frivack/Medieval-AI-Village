@@ -255,6 +255,15 @@ entry per agent, includes `workplace`):
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
   This rate was chosen to balance historical plausibility against
   computational simplicity (the ratio was researched before it was committed).
+- **Amounts a model reads** carry their copper total and, for more than
+  one item, the unit price: `with_copper(34, 2)` → "3s 4c (34c, 17c
+  each)" — trade memories, deal outcomes, offers, wealth and template
+  lines all use it, and the system prompt states 1 silver = 10 copper.
+  Bare coins got misconverted: "14 silver for eight" was retold as "35c
+  apiece" (1 silver taken as 20c) and spread as a rumor. A paid Opus day
+  after the fix: 18 unit prices quoted in dialogue, none wrong (4 before).
+  `to_string()` stays coins-only — `frontend/src/currency.js` mirrors it
+  for display.
 
 ### Memory / retrieval (live since 2026-07-16)
 - **Short-term memory:** every notable event is written to
@@ -460,9 +469,11 @@ low) showed:
      2 → 0, news about everyday goods 5 → 0, wake-up memories 1 → 0, and
      every pair still "neutral" after a day except one that turned
      "wary" after being cheated twice.
-   - Open: money in memories and lines ("14 silver", "3s 4c") gets
-     misconverted (1 silver taken as 20c) and spreads as rumor — write
-     trade memories in copper with a per-unit price.
+   - Then money notation: bare coins in memories ("14 silver", "3s 4c")
+     got misconverted (1 silver taken as 20c) and spread as rumor. Now
+     every amount a model reads keeps the coins and adds the copper total
+     and unit price (§3 Currency); the next paid Opus day had 0 wrong
+     unit prices in dialogue (4 before).
 4. Frontend: bubbles + live panel first.
 5. Deploy to a dedicated instance: server-driven ticks every 60 s, manual
    ticks off.

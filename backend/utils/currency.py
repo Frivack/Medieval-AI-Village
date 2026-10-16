@@ -26,3 +26,14 @@ def to_string(copper: int) -> str:
     if d["copper"] > 0:
         parts.append(f"{d['copper']}c")
     return " ".join(parts) if parts else "0c"
+
+def with_copper(copper: int, quantity: int = 1) -> str:
+    """An amount for text a model reads: coins plus the copper total, and
+    the price per unit when it covers more than one —
+    "3s 4c (34c, 17c each)". Bare coins alone got misread: "14 silver for
+    eight" was retold as "35c apiece" (1 silver taken as 20 copper)."""
+    coins = to_string(copper)
+    extra = [] if coins == f"{copper}c" else [f"{copper}c"]
+    if quantity > 1:
+        extra.append(f"{copper / quantity:g}c each")
+    return f"{coins} ({', '.join(extra)})" if extra else coins

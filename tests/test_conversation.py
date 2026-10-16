@@ -172,3 +172,13 @@ def test_everyday_purchases_are_routine_memories_but_wheat_is_news(db):
     trade.settle(margaret, gilbert, "wheat", 2, 36, EVENING)     # and sells her wheat
     assert [m["importance"] for m in gilbert.short_term_memory] == [1, 3]
     assert [m["text"] for m in news_for(gilbert, "Edmund")] == [gilbert.short_term_memory[1]["text"]]
+
+
+def test_trade_memories_carry_the_copper_total_and_unit_price(db):
+    margaret = villager(db, "Margaret", "Innkeeper", "Inn")
+    gilbert = villager(db, "Gilbert", "Merchant", "Market", {"wheat": 10})
+    trade.settle(margaret, gilbert, "wheat", 8, 140, EVENING)
+    assert gilbert.short_term_memory[-1]["text"] == \
+        "I sold 8 wheat to Margaret for 14s (140c, 17.5c each)."
+    poor = villager(db, "Thomas", "Farmer", "Farm", wealth=10)
+    assert trade.check(poor, gilbert, "wheat", 1, 15, "Inn") == "Thomas can't afford 1s 5c (15c)"

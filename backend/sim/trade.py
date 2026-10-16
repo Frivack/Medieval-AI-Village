@@ -5,7 +5,7 @@
 from backend.memory.short_term import remember
 from backend.sim import economy
 from backend.sim.actions import ActionType
-from backend.utils.currency import to_string
+from backend.utils.currency import with_copper
 
 # A deal's price may differ from the economy's price by at most this much,
 # so a hallucinating model can't wreck the economy (same idea as TRADE v2).
@@ -37,7 +37,7 @@ def check(buyer, seller, item: str, quantity: int, price: int, place: str):
     if economy.for_sale(seller.job, seller.workplace, place, seller.inventory or {}).get(item, 0) < quantity:
         return f"{seller.name} can't spare {quantity} {item}"
     if buyer.wealth < price:
-        return f"{buyer.name} can't afford {to_string(price)}"
+        return f"{buyer.name} can't afford {with_copper(price)}"
     return None
 
 
@@ -61,11 +61,12 @@ def settle(buyer, seller, item: str, quantity: int, total: int, tick: int) -> li
     seller.wealth += total
     # A meal or an ale is routine; a deal over wheat or tools is news.
     importance = 1 if item in economy.EVERYDAY_GOODS else 3
-    remember(buyer, tick, f"I bought {quantity} {item} from {seller.name} for {to_string(total)}.",
-             importance)
-    remember(seller, tick, f"I sold {quantity} {item} to {buyer.name} for {to_string(total)}.",
-             importance)
-    detail = f"{buyer.name} bought {quantity} {item} from {seller.name} for {to_string(total)}"
+    # Memories become news that gets retold, so they carry the copper total
+    # and the unit price: "for 3s 4c (34c, 17c each)".
+    amount = with_copper(total, quantity)
+    remember(buyer, tick, f"I bought {quantity} {item} from {seller.name} for {amount}.", importance)
+    remember(seller, tick, f"I sold {quantity} {item} to {buyer.name} for {amount}.", importance)
+    detail = f"{buyer.name} bought {quantity} {item} from {seller.name} for {amount}"
     return [
         {"agent_id": buyer.id, "action": ActionType.TRADE.value, "copper_change": -total,
          "item": item, "quantity": quantity, "seller": seller.name, "buyer": buyer.name,

@@ -79,9 +79,12 @@ def test_the_speaker_sees_deals_already_done(db):
         now += 1
     text = prompts.speaker_prompt(speech.speaker_view(convo, gilbert, margaret, now, 0,
                                                       conv.MAX_LINES - len(convo.lines)))
-    deal = "Gilbert bought 3 food from Margaret for 36c"
+    deal = "Gilbert bought 3 food from Margaret for 3s 6c (36c, 12c each)"
     assert f"Already done in this conversation (goods and coin have changed hands): {deal}." in text
     assert f"[deal done: {deal}]" in text
+    # Every amount comes with its copper total, so nobody converts silver.
+    assert "You have 4g 16s 4c (964c)" in text           # 1000c - 36c
+    assert "1 silver is 10 copper" in prompts.SPEAKER_SYSTEM
 
 
 def test_schemas_are_strict_objects():

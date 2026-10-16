@@ -10,7 +10,7 @@ import json
 from backend.config import BASE_DIR
 from backend.sim import economy, schedule
 from backend.sim.clock import format_clock
-from backend.utils.currency import to_string
+from backend.utils.currency import with_copper
 from backend.world.map import village_map
 
 ITEMS = sorted(economy.BASE_PRICES)
@@ -22,7 +22,7 @@ _PRICE_LIST = ", ".join(f"{_item} {economy.BASE_PRICES[_item]}c" for _item in IT
 _WORLD = f"""THE VILLAGE
 Four buildings: {", ".join(PLACES)}. Four villagers: {"; ".join(f"{a['name']}, the {a['job'].lower()} (works at the {a['workplace']})" for a in _ROSTER)}.
 How it runs: Thomas grows wheat, and needs farming tools to do it; tools wear out. Edmund makes farming tools. Gilbert the merchant buys wheat at the Farm in the morning and sells it at the Inn in the evening. Margaret cooks meals at the Inn from wheat. Everyone eats about three meals a day and carries a few. People work 06:00-18:00, spend the evening at the Inn and sleep at home 22:00-06:00, unless they plan otherwise.
-Money: 1 gold (g) = 20 silver (s) = 200 copper (c). Usual prices per unit: {_PRICE_LIST}. A merchant usually buys at about {round(economy.WHOLESALE * 100)}% and sells at about {round(economy.RETAIL * 100)}% of these. Never use any other kind of coin."""
+Money: 1 gold (g) = 20 silver (s) = 200 copper (c), so 1 silver is 10 copper. Amounts are written with their copper total and, for several items, the price per item: "3s 4c (34c, 17c each)" — compare prices by those copper numbers. Usual prices per unit: {_PRICE_LIST}. A merchant usually buys at about {round(economy.WHOLESALE * 100)}% and sells at about {round(economy.RETAIL * 100)}% of these. Never use any other kind of coin."""
 
 SPEAKER_SYSTEM = f"""You voice one villager in a small medieval village simulation, one line at a time, in a conversation with one other villager.
 
@@ -146,7 +146,7 @@ def speaker_prompt(v: dict) -> str:
     if v["could_buy"]:
         o = v["could_buy"]
         parts.append(f"You'd like to buy {o['quantity']} {o['item']} from them "
-                     f"({o['price']}c in total at the usual price).")
+                     f"({with_copper(o['price'], o['quantity'])} at the usual price).")
     if v["deals"]:
         parts.append("Already done in this conversation (goods and coin have changed hands): "
                      + "; ".join(_deal(d) for d in v["deals"]) + ".")
@@ -220,7 +220,7 @@ def _state(me: dict) -> str:
     feel = [_hunger(needs["hunger"])]
     if "tool" in needs:
         feel.append(_tool(needs["tool"]))
-    return f"How you are: {'; '.join(feel)}. You have {me['wealth']}c ({to_string(me['wealth'])}) and carry {carry}."
+    return f"How you are: {'; '.join(feel)}. You have {with_copper(me['wealth'])} and carry {carry}."
 
 
 def _hunger(h: float) -> str:
@@ -264,10 +264,12 @@ def _goods(label: str, prices: dict, note: str) -> str:
 
 
 def _deal(d: dict) -> str:
-    return f"{d['buyer']} bought {d['quantity']} {d['item']} from {d['seller']} for {d['price']}c"
+    return (f"{d['buyer']} bought {d['quantity']} {d['item']} from {d['seller']} "
+            f"for {with_copper(d['price'], d['quantity'])}")
 
 
 def _offer(o: dict, partner: str) -> str:
+    amount = with_copper(o["price"], o["quantity"])
     if o["kind"] == "buy":
-        return f"{partner} wants to buy {o['quantity']} {o['item']} from you for {o['price']}c in total"
-    return f"{partner} wants to sell you {o['quantity']} {o['item']} for {o['price']}c in total"
+        return f"{partner} wants to buy {o['quantity']} {o['item']} from you for {amount}"
+    return f"{partner} wants to sell you {o['quantity']} {o['item']} for {amount}"

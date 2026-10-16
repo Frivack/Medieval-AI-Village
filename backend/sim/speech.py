@@ -21,7 +21,7 @@ from backend.memory.selection import memory_lines
 from backend.memory.short_term import news_for
 from backend.sim import economy, schedule, trade
 from backend.sim.clock import game_time
-from backend.utils.currency import to_string
+from backend.utils.currency import with_copper
 
 
 def _me(agent, now: int) -> dict:
@@ -41,7 +41,7 @@ def _outcome(line: dict, deals) -> str | None:
     deal = next((d for d in deals or [] if d["tick"] == line["tick"]), None)
     if deal and line.get("response") == "accept":
         return (f"deal done: {deal['buyer']} bought {deal['quantity']} {deal['item']} "
-                f"from {deal['seller']} for {deal['price']}c")
+                f"from {deal['seller']} for {with_copper(deal['price'], deal['quantity'])}")
     return None
 
 
@@ -140,12 +140,12 @@ def template_turn(v: dict) -> dict:
     if v["pending_offer"]:
         o = v["pending_offer"]
         turn["response"] = "accept"
-        said.append(f"{o['quantity']} {_name(o['item'])} for {to_string(o['price'])}? Done.")
+        said.append(f"{o['quantity']} {_name(o['item'])} for {with_copper(o['price'], o['quantity'])}? Done.")
     if v["could_buy"] and v["lines_left"] > 1:
         o = v["could_buy"]
         turn["offer"] = o
         said.append(f"I'd like {o['quantity']} {_name(o['item'])}, if you can spare it "
-                    f"- {to_string(o['price'])}?")
+                    f"- {with_copper(o['price'], o['quantity'])}?")
 
     if not turn["response"] and not turn["offer"]:
         already_shared = any(l["shared"] and l["speaker"] == me for l in transcript)
