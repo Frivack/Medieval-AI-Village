@@ -8,15 +8,22 @@
 #        someone here (trade, appointment, news, chat) -> start a
 #        conversation; an urgent need -> go where it's sold; otherwise the
 #        schedule (backend/sim/schedule.py)
-# No LLM call happens here yet: lines come from templates (stage 2).
+#      Waking up comes first: the villager plans the day once.
+# The only LLM calls: conversation lines, the replan after a conversation
+# and the plan at waking (backend/llm/providers.py picks Claude or the
+# templates; a failed call falls back to the template).
 from backend.config import MINUTES_PER_TICK
 from backend.database import SessionLocal, AgentState, TickHistory, SimState
+from backend.llm import providers
 from backend.memory.short_term import remember
-from backend.sim import conversation, economy, schedule
+from backend.sim import conversation, economy, schedule, speech
 from backend.sim.actions import ActionType
 from backend.sim.clock import game_time  # re-exported for main.py
 from backend.world.map import village_map
 from backend.world.pathfinding import find_path
+
+# (view -> turn, view -> plan), chosen once by config.CONVERSATION_LLM.
+SPEAK, PLAN = providers.conversation_functions()
 
 
 def run_tick() -> dict:
@@ -45,9 +52,9 @@ def run_tick() -> dict:
         said, listening, busy = {}, {}, set()
         for convo in conversation.active(db):
             if conversation.bedtime(convo, by_id, tick):
-                conversation.end(convo, by_id, "bedtime", tick, relations)
+                conversation.end(convo, by_id, "bedtime", tick, relations, PLAN)
                 continue
-            out = conversation.advance(convo, by_id, tick, relations)
+            out = conversation.advance(convo, by_id, tick, relations, SPEAK, PLAN)
             said[out["speaker_id"]] = out
             listening[out["partner_id"]] = out["speaker_id"]
             if not out["ended"]:
@@ -90,10 +97,20 @@ def _talk_entry(out: dict, by_id: dict) -> dict:
 def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set) -> dict:
     tick = time["tick"]
     needs = economy.needs_of(agent.job, agent.needs)
+    plan = schedule.ensure(agent.daily_plan, agent.job, agent.workplace, tick)
+    if plan != agent.daily_plan:
+        agent.daily_plan = plan
+    block = schedule.current(plan, tick)
 
     # Already walking somewhere → take the next step.
     if agent.path:
         return _advance_along_path(agent, tick)
+
+    # Just woke up (asleep last tick, the sleep block is over) → plan the
+    # day, once per day: keep the routine or change it.
+    if (agent.status == "resting" and (block is None or block["do"] != schedule.SLEEP)
+            and not schedule.is_planned(plan, time["day"])):
+        return _plan_day(agent, by_id, tick, time["day"])
 
     # Hungry and carrying food → eat it, wherever we are.
     if economy.should_eat(needs, agent.inventory or {}):
@@ -107,7 +124,7 @@ def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set) -> d
         partner, reason, topic = picked
         convo = conversation.start(db, agent, partner, reason, topic, tick)
         busy |= {agent.id, partner.id}
-        out = conversation.advance(convo, by_id, tick, relations)
+        out = conversation.advance(convo, by_id, tick, relations, SPEAK, PLAN)
         if out["ended"]:
             busy -= {agent.id, partner.id}
         return _talk_entry(out, by_id)
@@ -120,15 +137,13 @@ def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set) -> d
         result["detail"] = f"set off to {place} to buy {item}"
         return result
 
-    # The schedule: what does this minute's block say?
-    plan = schedule.ensure(agent.daily_plan, agent.job, agent.workplace, tick)
-    if plan != agent.daily_plan:
-        agent.daily_plan = plan
-    block = schedule.current(plan, tick)
-    if block is None:  # the routine covers every minute; only a broken plan gets here
+    # The schedule: what does this minute's block say? (A conversation or
+    # a move above may have changed the plan, so look again.)
+    block = schedule.current(agent.daily_plan, tick)
+    if block is None:  # a cancelled block leaves free time: stay put
         agent.status = "idle"
         return {"action": ActionType.OBSERVE.value,
-                "detail": f"nothing planned at {agent.location}"}
+                "detail": f"free time at {agent.location}"}
     if agent.location != block["at"]:
         return _start_move(agent, block["at"], tick)
 
@@ -146,6 +161,18 @@ def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set) -> d
     why = f" to {block['why']}" if block["why"] else ""
     return {"action": ActionType.OBSERVE.value,
             "detail": f"visiting {agent.location}{who}{why}"}
+
+
+def _plan_day(agent, by_id: dict, tick: int, day: int) -> dict:
+    """The wake-up planner: one call that sees today's schedule and may
+    edit it (validated like any other plan). Templates keep the routine."""
+    agent.daily_plan = schedule.mark_planned(agent.daily_plan, day)
+    answer = PLAN(speech.wake_view(agent, tick))
+    record = conversation.apply_plan(answer, agent, tick, [p.name for p in by_id.values()])
+    agent.status = "planning"
+    changes = "; ".join(record["applied"]) or "kept the routine"
+    return {"action": ActionType.OBSERVE.value,
+            "detail": f"woke up and planned the day: {changes}", "plan": record}
 
 
 def _errand(agent, all_agents, needs: dict):

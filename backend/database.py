@@ -75,6 +75,9 @@ class Conversation(Base):
     lines = Column(JSON, default=list)
     pending_offer = Column(JSON, nullable=True)
     deals = Column(JSON, default=list)
+    # What each side made of it afterwards: [{"who", "applied", "rejected",
+    # "memory", "affinity"}] (schedule edits applied/rejected by validation).
+    replans = Column(JSON, default=list)
 
 
 class Relationship(Base):

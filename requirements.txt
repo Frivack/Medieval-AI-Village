@@ -2,6 +2,8 @@ fastapi
 uvicorn
 sqlalchemy
 httpx
+python-dotenv   # reads the local .env (backend/config.py)
+anthropic       # Claude speakers/planners when CONVERSATION_LLM=claude
 
 # Optional, dev PC only (too heavy for the 1 GB deployment box):
 # enables long-term agent memory retrieval; the sim degrades

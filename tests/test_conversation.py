@@ -1,35 +1,10 @@
 # The conversation engine against a real (temporary) SQLite database,
 # with the template speaker: no LLM involved.
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from backend.database import AgentState, Base, Conversation
+from backend.database import Conversation
 from backend.sim import conversation as conv
 from backend.sim import schedule
 from backend.sim.clock import tick_at
-
-EVENING = tick_at(2, 19)          # SOCIAL time for everyone but the innkeeper
-
-
-@pytest.fixture
-def db(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
-    Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
-    yield session
-    session.close()
-
-
-def villager(db, name, job, workplace, inventory=None, wealth=1000, location="Inn", now=EVENING):
-    a = AgentState(id=name.lower(), name=name, age=40, job=job, personality="Plain.",
-                   wealth=wealth, location=location, workplace=workplace, x=0, y=0, path=[],
-                   status="idle", inventory=inventory or {}, needs={"hunger": 0.0},
-                   short_term_memory=[],
-                   daily_plan=schedule.ensure(None, job, workplace, now))
-    db.add(a)
-    db.flush()
-    return a
+from tests.helpers import EVENING, villager
 
 
 def run_conversation(db, initiator, everyone, now=EVENING):
@@ -141,3 +116,35 @@ def test_ending_records_the_talk_for_both_sides(db):
     assert not relations.recently_talked(thomas.id, edmund.id, EVENING + conv.COOLDOWN_TICKS)
     assert thomas.talking_to is None and edmund.talking_to is None
     assert db.query(Conversation).one().status == "ended"
+
+
+def test_a_replan_edits_the_schedule_and_is_recorded(db):
+    thomas = villager(db, "Thomas", "Farmer", "Farm")
+    edmund = villager(db, "Edmund", "Blacksmith", "Smithy")
+    relations = conv.Relations(db)
+    by_id = {a.id: a for a in (thomas, edmund)}
+    convo = conv.start(db, thomas, edmund, "chat", {}, EVENING)
+
+    def planner(view):
+        if view["me"]["name"] == "Edmund":     # no change, but a grudge (clamped to -2)
+            return {"change": False, "ops": [{"op": "cancel", "block": "anything"}],
+                    "memory": None, "affinity": -5}
+        return {"change": True, "affinity": 1,
+                "memory": {"text": "Edmund will mend my plough tomorrow.", "importance": 3},
+                "ops": [{"op": "insert", "day": 3, "from": "07:00", "to": "07:30", "do": "VISIT",
+                         "at": "Smithy", "with": "Edmund", "why": "get the plough mended"},
+                        {"op": "insert", "day": 3, "from": "07:03", "to": "08:00",
+                         "do": "VISIT", "at": "Smithy"}]}
+
+    conv.end(convo, by_id, "goodbye", EVENING, relations, planner)
+
+    visit = schedule.current(thomas.daily_plan, tick_at(3, 7, 10))
+    assert (visit["do"], visit["at"], visit["with"]) == ("VISIT", "Smithy", "Edmund")
+    assert schedule.current(thomas.daily_plan, tick_at(3, 7, 40))["do"] == "WORK"   # routine resumes
+    mine, his = convo.replans
+    assert mine["who"] == "Thomas" and len(mine["applied"]) == 1
+    assert len(mine["rejected"]) == 1 and "5-minute grid" in mine["rejected"][0]
+    assert thomas.short_term_memory[-1] == {"tick": EVENING, "importance": 3,
+                                            "text": "Edmund will mend my plough tomorrow."}
+    assert his["applied"] == his["rejected"] == [] and his["affinity"] == -2
+    assert relations.affinity("edmund", "thomas") == -2 and relations.affinity("thomas", "edmund") == 1

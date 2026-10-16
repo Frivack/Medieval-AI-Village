@@ -7,7 +7,14 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).parent.parent  # backend/ -> repo root
+
+# Local secrets and settings (ANTHROPIC_API_KEY, ...) from the gitignored
+# repo-root .env. Real environment variables win (override=False), so on the
+# server the systemd EnvironmentFile decides.
+load_dotenv(BASE_DIR / ".env", override=False)
 
 # The world's runtime state. VILLAGE_DB_PATH points tests and the offline
 # simulator (tools/simulate.py) at a throwaway file instead of the dev world.
@@ -21,6 +28,22 @@ LLM_API_KEY = os.getenv("LLM_API_KEY", "not-needed")  # local servers ignore it
 # decisions quickly when no LLM server is running.
 LLM_CONNECT_TIMEOUT = float(os.getenv("LLM_CONNECT_TIMEOUT", "2.0"))
 LLM_READ_TIMEOUT = float(os.getenv("LLM_READ_TIMEOUT", "30.0"))
+
+# Conversations: who writes the lines and the plans (backend/llm/providers.py).
+# "template" needs no LLM and costs nothing — the default, so a manual
+# "+1 day" in dev can't run up a bill. "claude" uses the Claude API
+# (ANTHROPIC_API_KEY); any failed call falls back to the template.
+CONVERSATION_LLM = os.getenv("CONVERSATION_LLM", "template").lower()
+# VILLAGE_-prefixed on purpose: Claude Code exports its own CLAUDE_EFFORT
+# (e.g. "xhigh") into every shell it starts, and an unprefixed name picked
+# that up — every call then failed with a 400.
+CLAUDE_MODEL = os.getenv("VILLAGE_CLAUDE_MODEL", "claude-opus-5-5")
+CLAUDE_EFFORT = os.getenv("VILLAGE_CLAUDE_EFFORT", "low")
+CLAUDE_TIMEOUT_SECONDS = float(os.getenv("VILLAGE_CLAUDE_TIMEOUT_SECONDS", "30"))
+# Safety net besides the Console spend limit: after this many calls in a
+# (UTC) day, conversations fall back to templates until tomorrow. A
+# simulated day needs ~70 calls; the counter resets when the server restarts.
+LLM_DAILY_CALL_LIMIT = int(os.getenv("LLM_DAILY_CALL_LIMIT", "500"))
 
 # World
 MAP_WIDTH = 100

@@ -47,7 +47,11 @@ section described work that was never committed.)*
   `pytest.ini` sets the repo root on the path). **Offline simulator:**
   `python tools/simulate.py --days 3` runs the world on a throwaway DB
   with no LLM and prints everyone's most common state per hour, Inn
-  arrivals, stuck agents and the end-state economy.
+  arrivals, stuck agents and the end-state economy. `--llm claude
+  --model X --max-cost USD` runs it with **paid** Claude calls and stops
+  at the cost cap (or when the first 5 calls all fail); `--export F`
+  writes every speaker/planner call, the conversations and the usage as
+  JSON — the stage 3 model comparison came from it.
 - `.claude/launch.json` holds the dev-server config so Claude Code's
   browser preview can start uvicorn (local port 8000).
   `ai-village-api-live` (port 8001) previews production mode locally:
@@ -96,22 +100,26 @@ entry per agent, includes `workplace`):
     partner's offer settles it at once (checked + clamped); one pending
     offer at a time; max 8 lines; bedtime ends it; an unanswered offer
     lapses. Told news is marked and the listener remembers "X told me: …".
-  - *After* (`end()`): each side gets a *replanner* `view -> {change, ops,
-    memory, affinity}`; affinity moves ≤ 2 per conversation, last talk is
-    recorded. **Schedule ops are not applied yet** — they come with the
-    Claude replanner and its validation in stage 3.
+  - *After* (`end()`): each side gets a *planner* call `view -> {change,
+    ops, memory, affinity}` (`apply_plan()`, shared with the wake-up
+    plan): ops are validated and applied by `schedule.apply_ops`, the
+    memory is stored (importance 1–3), affinity moves ≤ 2 per
+    conversation, last talk is recorded. What each side made of it lands
+    in `Conversation.replans` (applied / rejected ops with the reason,
+    memory, affinity).
   - *Templates* (`template_turn` / `template_replan`): answer offers, buy
     what's wanted, share one piece of news in social talk, small talk,
     goodbye; replan changes nothing (no affinity drift without an LLM).
-    Stage 3 swaps in Claude speaker/replanner functions with the same
-    signatures — the engine stays as is.
-  - `GET /conversations?active=&limit=` returns transcripts (stage 4's
-    live panel source); TALK lines already show in the village log.
+    Claude's speaker/planner have the same signatures (see §3 LLM
+    integration) — the engine doesn't know which one it runs.
+  - `GET /conversations?active=&limit=` returns transcripts with
+    `replans` (stage 4's live panel source); TALK lines already show in
+    the village log.
 - **TRADE v2 negotiation** (`backend/sim/negotiation.py`, 2026-07-16):
   LLM seller/buyer reactions with counters clamped to 70–130% of base.
   **Unused since stage 1b** — prices come from the economy rules, and
   haggling happens through conversation offers (counter = new offer).
-  Its prompts are a reference for the stage 3 speaker.
+  Kept for reference only.
 - **Economy** (`backend/sim/economy.py`, stage 1b, since 2026-10-16) —
   rules and tuned numbers in one file, pure functions:
   - *Hunger* grows 8/h awake, 3/h asleep; at 50 a villager eats a carried
@@ -133,7 +141,8 @@ entry per agent, includes `workplace`):
     within ±6c/day for everyone except one-off effects of starting stock.
   - *Tick order:* everyone's hunger grows → every active conversation
     says its next line (bedtime ends it) → everyone not talking: walk →
-    eat → start a conversation if there's a reason → urgent errand
+    just woke up: plan the day → eat → start a conversation if there's a
+    reason → urgent errand
     (hungry with no food, broken tool: go where it's sold, if someone
     awake sells it) → schedule block.
   - State: `AgentState.needs` JSON (`hunger`, `tool`), defaults via
@@ -165,6 +174,23 @@ entry per agent, includes `workplace`):
   block each tick (walk to its place first); `GET /villagers` includes it
   as `activity`. Days already laid keep the routine they were laid with —
   a routine change shows up from the next unlaid day.
+  - *Planner edits* (`apply_ops`, stage 3): ≤ 3 ops per call — `insert`
+    (day, from, to, do, at, with, why), `cancel` (block id), `move`
+    (block id → new day/from/to). Each is validated on its own and
+    rejected with a reason: unknown place/person/block, off the 5-minute
+    grid, in the past or beyond the end of tomorrow, WORK away from the
+    workplace, > 5 appointments, or a night (noon to noon) left with < 6 h
+    of SLEEP. An inserted block keeps what it cut away in `covers`, so
+    cancelling or moving it gives that back; cancelling a routine block
+    leaves free time (no block: the villager stays put, and it counts as
+    leisure for chatting). Planners see blocks as `for_planner()` lists
+    with ids `b<start tick>`.
+  - *Wake-up plan* (stage 3): when a villager was asleep last tick and the
+    sleep block is over, it plans the day once (`daily_plan["planned"]`
+    records the days): one planner call sees today's and tomorrow's
+    blocks, its memories and needs, and may edit the schedule (validated
+    as above). Templates keep the routine. Checked before eating or
+    talking, so a hungry wake-up still plans.
 - **Who advances time** (`backend/sim/runner.py`, since 2026-10-15):
   `TICK_INTERVAL_SECONDS > 0` starts a background loop in the FastAPI
   lifespan — one tick every N real seconds, fixed rate with no catch-up
@@ -181,10 +207,35 @@ entry per agent, includes `workplace`):
 - `backend/llm/client.py` — OpenAI-compatible `/chat/completions` via httpx.
   Endpoint/model come from env vars (`LLM_BASE_URL`, `LLM_MODEL`); defaults
   to LM Studio at `http://localhost:1234/v1` (see `backend/config.py`).
-- **No LLM is called during a tick right now.** The per-tick decider was
-  removed in stage 1a and negotiation retired in 1b (2026-10-16); behavior
-  comes from schedules + economy rules, conversation lines from templates
-  (stage 2). Stage 3 plugs Claude into `speech`'s speaker/replanner slots.
+  Nothing uses it since the per-tick decider was removed (stage 1a);
+  kept for running a local model later.
+- **Claude for conversations** (stage 3, since 2026-10-16). LLM calls
+  happen only for conversation lines, the planner after a conversation
+  and the wake-up plan — ~115 calls per in-game day with 4 villagers.
+  - `backend/llm/providers.py` picks the (speaker, planner) pair once at
+    import: templates unless `CONVERSATION_LLM=claude` (default
+    `template`, so local "+1 day" clicks cost nothing). Each Claude call
+    that fails falls back to the template for that one line or plan.
+  - `backend/llm/claude.py`: official `anthropic` SDK, structured outputs
+    (`prompts.TURN_SCHEMA` / `PLAN_SCHEMA`), the fixed system prompt
+    cache-marked (≈60% of input tokens are cache reads), effort `low`,
+    per-model thinking (Haiku `disabled`, Sonnet `between_tools`, Opus
+    5.5 can't disable it — omitted). Opus/Sonnet requests go through the
+    beta endpoint with `fallbacks: "default"` (`server-side-fallback-
+    2026-07-01`): a falsely refused request is re-run server-side on a
+    fallback model. Refusal, `max_tokens`, API errors, unparseable JSON
+    and the daily cap all raise `ClaudeUnavailable` → template.
+  - `backend/llm/prompts.py` renders views into prompts (English) and maps
+    replies back (`share` comes back as a news id).
+  - Settings: `VILLAGE_CLAUDE_MODEL` (default `claude-opus-5-5`, chosen
+    2026-10-16), `VILLAGE_CLAUDE_EFFORT` (`low`),
+    `VILLAGE_CLAUDE_TIMEOUT_SECONDS` (30, one retry),
+    `LLM_DAILY_CALL_LIMIT` (500 calls per UTC day, then templates).
+    `ANTHROPIC_API_KEY` comes from the gitignored `.env` (loaded by
+    `config.py`) locally, an EnvironmentFile on the server.
+  - `backend/llm/usage.py` counts today's calls, tokens and estimated
+    cost per model price (Opus 5.5 cache reads are 0.05× input, the
+    others 0.1×); `GET /status` shows it under `llm`.
 
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
@@ -203,7 +254,8 @@ entry per agent, includes `workplace`):
   moved out of the old decider): top-8 by `importance × 6 in-game hours −
   age`, duplicates collapsed, shown chronologically. Recency alone drowned
   a trade under one evening of repeated greetings — that's why importance
-  exists. Unused until the stage 3 conversation prompts.
+  exists. Feeds the speaker and planner prompts; planners add their own
+  one-line memory after each conversation and on waking.
 - **ChromaDB long-term store is OPTIONAL** (`backend/memory/store.py`):
   install `chromadb` on the dev PC only — far too heavy for the 1 GB
   deployment box, which degrades gracefully to a null store. When
@@ -371,11 +423,23 @@ low) showed:
    Conversations). All buying now happens in trade conversations. Sim:
    ~15 conversations per in-game day → with an LLM ≈ 40 line calls + 30
    replan calls per in-game day.
-3. Claude integration: `backend/llm/claude.py` on the official `anthropic`
-   SDK (structured outputs; the OpenAI-compatible client stays for LM
-   Studio / the 1080 Ti, picked by env var; key from a gitignored `.env`
-   locally, a root-only EnvironmentFile on the server). Re-run the model
-   comparison on the real conversation prompts and choose the model then.
+3. ~~Claude integration.~~ ✅ 2026-10-16 (see §3 LLM integration), plus a
+   wake-up plan (one planner call per villager per morning) and planner
+   edits actually applied. **Model: Claude Opus 5.5**, chosen from a paid
+   comparison — each model ran the same world for 2 in-game days
+   (`tools/simulate.py --llm claude --export`; the report stays local):
+   - Cost per in-game day (= per real day at 60 s ticks): Haiku 5.5
+     $0.03, Sonnet 5.5 $0.31, Opus 5.5 ≈ $0.65 (~$19/month).
+   - Haiku: cheap but incoherent — re-offered closed deals (duplicate
+     trades), misread its own numbers, invented stories and churned
+     schedules around them. Sonnet: natural haggling, rarely edits
+     schedules, affinity +1 after nearly every talk. Opus: most coherent —
+     keeps agreed prices across conversations, affinity −1 when cheated,
+     schedule edits that follow from promises.
+   - Follow-ups the comparison exposed (all models): affinity inflation;
+     ale purchases stored at importance 3 and retold as news; the speaker
+     view doesn't list deals already settled in the conversation; wake-up
+     plans rarely change anything (fine — 4 calls a day).
 4. Frontend: bubbles + live panel first.
 5. Deploy to a dedicated instance: server-driven ticks every 60 s, manual
    ticks off.
@@ -403,6 +467,11 @@ low) showed:
   attempt burns the full `LLM_CONNECT_TIMEOUT` (2 s) instead of failing
   instantly. Set `LLM_CONNECT_TIMEOUT=0.2` (or start LM Studio) for
   snappy local dev. On Linux the connect is refused immediately.
+- **Claude Code exports `CLAUDE_EFFORT` (e.g. `xhigh`) into every shell it
+  starts.** Our settings used to read that same name, so every API call
+  from a Claude Code session failed with a 400 (Haiku with thinking off
+  can't take `xhigh`). Hence the `VILLAGE_CLAUDE_*` names — keep project
+  env vars prefixed.
 - **Always get DB sessions via `Depends(get_db)` in FastAPI routes.**
   Hand-calling `next(get_db())` skips the generator's `finally`, leaks
   the session, and under frontend polling exhausts the connection pool

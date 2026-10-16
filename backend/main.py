@@ -9,10 +9,12 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from backend.config import (MANUAL_TICK_ENABLED, MINUTES_PER_TICK,
+from backend.config import (CLAUDE_MODEL, CONVERSATION_LLM, LLM_DAILY_CALL_LIMIT,
+                            MANUAL_TICK_ENABLED, MINUTES_PER_TICK,
                             TICK_INTERVAL_SECONDS, TICKS_PER_DAY)
 from backend.database import init_db, get_db, AgentState, Conversation, TickHistory, SimState
 from backend.agents.loader import load_agents_from_json
+from backend.llm import usage
 from backend.sim import economy, schedule
 from backend.sim.runner import run_tick_locked, tick_loop
 from backend.sim.clock import format_clock
@@ -95,14 +97,20 @@ def advance_tick(count: int = 1):
 
 @app.get("/status")
 def get_status():
-    """How time advances on this server. The frontend hides the manual
-    tick controls when manual_tick is false, and converts ticks to clock
-    times with minutes_per_tick instead of hard-coding the time scale."""
+    """How time advances on this server, and who writes the conversations.
+    The frontend hides the manual tick controls when manual_tick is false,
+    and converts ticks to clock times with minutes_per_tick instead of
+    hard-coding the time scale. `llm` shows today's (UTC) calls and the
+    estimated cost since the process started."""
+    claude = CONVERSATION_LLM == "claude"
     return {
         "auto_tick": TICK_INTERVAL_SECONDS > 0,
         "tick_interval_seconds": TICK_INTERVAL_SECONDS,
         "manual_tick": MANUAL_TICK_ENABLED,
         "minutes_per_tick": MINUTES_PER_TICK,
+        "conversations": "claude" if claude else "template",
+        "llm": {"model": CLAUDE_MODEL, "daily_call_limit": LLM_DAILY_CALL_LIMIT,
+                "today": usage.snapshot()} if claude else None,
     }
 
 
@@ -153,7 +161,8 @@ def get_conversations(active: bool = False, limit: int = 10, db: Session = Depen
          "place": c.place, "reason": c.reason, "status": c.status,
          "end_reason": c.end_reason, "started": format_clock(c.started_tick),
          "ended": format_clock(c.ended_tick) if c.ended_tick is not None else None,
-         "lines": c.lines or [], "pending_offer": c.pending_offer, "deals": c.deals or []}
+         "lines": c.lines or [], "pending_offer": c.pending_offer, "deals": c.deals or [],
+         "replans": c.replans or []}
         for c in rows
     ]
 

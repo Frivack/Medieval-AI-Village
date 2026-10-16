@@ -1,36 +1,45 @@
 # backend/sim/speech.py
-# What a villager says in a conversation, and what they make of it after.
+# What a villager says in a conversation, and what they make of it.
 #
-# The engine (conversation.py) builds a *view* — everything one villager
-# knows at that moment — and hands it to a *speaker* (view -> turn) or,
-# once the conversation is over, a *replanner* (view -> plan). This module
-# ships the template versions; stage 3 adds Claude versions with the same
-# signatures, so the engine never changes (strategy pattern).
+# The engine builds a *view* — everything one villager knows at that
+# moment — and hands it to a *speaker* (view -> turn) or a *planner*
+# (view -> plan). Planners run on an event: a conversation just ended
+# (event "conversation") or the villager just woke up (event "wake_up").
+# This module ships the template versions; backend/llm/claude.py has
+# Claude versions with the same signatures, picked by
+# backend/llm/providers.py — the engine never changes (strategy pattern).
 #
 # turn = {"line": str, "end": bool,
 #         "offer": None | {"kind": "buy"|"sell", "item", "quantity", "price"},
 #         "response": None | "accept" | "reject",   # to the partner's pending offer
 #         "share": None | memory}                    # news told in this line
-# plan = {"change": bool, "ops": [...],              # schedule edits (stage 3)
+# plan = {"change": bool, "ops": [...],              # schedule.apply_ops() edits
 #         "memory": None | {"text", "importance"}, "affinity": int}
 import zlib
 
+from backend.memory.selection import memory_lines
 from backend.memory.short_term import news_for
 from backend.sim import economy, schedule, trade
 from backend.sim.clock import game_time
 from backend.utils.currency import to_string
 
 
+def _me(agent, now: int) -> dict:
+    block = schedule.current(agent.daily_plan, now)
+    return {"name": agent.name, "age": agent.age, "job": agent.job,
+            "personality": agent.personality, "workplace": agent.workplace,
+            "wealth": agent.wealth, "inventory": dict(agent.inventory or {}),
+            "needs": economy.needs_of(agent.job, agent.needs),
+            "doing": schedule.describe(block) if block else None}
+
+
 def speaker_view(convo, speaker, partner, now: int, affinity: int, lines_left: int) -> dict:
-    needs = economy.needs_of(speaker.job, speaker.needs)
+    me = _me(speaker, now)
     pending = convo.pending_offer
-    block = schedule.current(speaker.daily_plan, now)
+    news = news_for(speaker, partner.name)[:3]
     return {
         "conversation_id": convo.id,
-        "me": {"name": speaker.name, "age": speaker.age, "job": speaker.job,
-               "personality": speaker.personality, "wealth": speaker.wealth,
-               "inventory": dict(speaker.inventory or {}), "needs": needs,
-               "doing": schedule.describe(block) if block else None},
+        "me": me,
         "partner": {"name": partner.name, "job": partner.job},
         "affinity": affinity,
         "place": convo.place,
@@ -42,19 +51,27 @@ def speaker_view(convo, speaker, partner, now: int, affinity: int, lines_left: i
                        for l in convo.lines or []],
         # Only an offer the partner made is mine to answer.
         "pending_offer": pending if pending and pending["by"] == partner.id else None,
-        "could_buy": trade.best_offer(speaker, partner, needs, convo.place),
+        "could_buy": trade.best_offer(speaker, partner, me["needs"], convo.place),
         "partner_sells": {item: economy.unit_price(item, speaker.job, partner.job)
                           for item in economy.for_sale(partner.job, partner.workplace,
                                                        convo.place, partner.inventory or {})},
-        "news": news_for(speaker, partner.name)[:3],
+        # What I could sell them, at the price they'd usually pay me.
+        "i_sell": {item: economy.unit_price(item, partner.job, speaker.job)
+                   for item in economy.for_sale(speaker.job, speaker.workplace,
+                                                convo.place, speaker.inventory or {})},
+        "news": [{"id": f"n{i + 1}", "tick": m["tick"], "text": m["text"]}
+                 for i, m in enumerate(news)],
+        "memories": memory_lines(speaker, now, f"talking with {partner.name} at {convo.place}"),
         "prices": dict(economy.BASE_PRICES),
         "lines_left": lines_left,
     }
 
 
 def replan_view(convo, me, partner, now: int, affinity: int) -> dict:
+    """For a planner after a conversation ended (event "conversation")."""
     return {
-        "me": {"name": me.name, "job": me.job, "personality": me.personality},
+        "event": "conversation",
+        "me": _me(me, now),
         "partner": {"name": partner.name, "job": partner.job},
         "affinity": affinity,
         "place": convo.place,
@@ -62,7 +79,20 @@ def replan_view(convo, me, partner, now: int, affinity: int) -> dict:
         "reason": convo.reason,
         "transcript": [{"speaker": l["speaker"], "text": l["text"]} for l in convo.lines or []],
         "deals": list(convo.deals or []),
-        "schedule": [schedule.describe(b) for b in schedule.blocks(me.daily_plan)],
+        "memories": memory_lines(me, now, f"after talking with {partner.name}"),
+        "schedule": schedule.for_planner(me.daily_plan, now),
+    }
+
+
+def wake_view(agent, now: int) -> dict:
+    """For a planner when the villager wakes up (event "wake_up")."""
+    return {
+        "event": "wake_up",
+        "me": _me(agent, now),
+        "place": agent.location,
+        "time": game_time(now),
+        "memories": memory_lines(agent, now, f"waking up at {agent.location}"),
+        "schedule": schedule.for_planner(agent.daily_plan, now),
     }
 
 
@@ -120,10 +150,10 @@ def template_turn(v: dict) -> dict:
 
 def template_replan(v: dict) -> dict:
     """No LLM, no judgment: the schedule and the relationship stay as they
-    are; a social conversation leaves a one-line memory. (Deals and news
-    are already remembered as they happen.)"""
+    are — waking up keeps the usual routine; a social conversation leaves a
+    one-line memory. (Deals and news are remembered as they happen.)"""
     memory = None
-    if not v["deals"]:
+    if v["event"] == "conversation" and not v["deals"]:
         memory = {"text": f"I talked with {v['partner']['name']} at {v['place']}.", "importance": 1}
     return {"change": False, "ops": [], "memory": memory, "affinity": 0}
 

@@ -6,9 +6,11 @@
 #   advance() — the next speaker says one line: answer the pending offer
 #               (accept -> settle at once), make an offer, share news
 #   end()     — goodbye / max lines / bedtime; then each side replans once
+#               (schedule edits validated by schedule.apply_ops)
 #
-# What gets said comes from a speaker function (backend/sim/speech.py):
-# templates now, Claude in stage 3 — same view in, same turn out.
+# What gets said and planned comes from speaker/planner functions: the
+# templates in backend/sim/speech.py or Claude (backend/llm/claude.py),
+# picked by backend/llm/providers.py — same view in, same turn out.
 import random
 
 from backend.config import TICKS_PER_HOUR
@@ -159,11 +161,14 @@ def end(convo, by_id: dict, why: str, now: int, relations: Relations,
     convo.end_reason = why
     convo.pending_offer = None           # an unanswered offer lapses
     a, b = by_id[convo.a_id], by_id[convo.b_id]
+    people = [p.name for p in by_id.values()]
+    replans = []
     for me, other in ((a, b), (b, a)):
         me.talking_to = None
         plan = replan_fn(speech.replan_view(convo, me, other, now,
                                             relations.affinity(me.id, other.id)))
-        _apply_replan(plan, me, other, now, relations)
+        replans.append(_apply_replan(plan, me, other, now, relations, people))
+    convo.replans = replans
 
 
 def _close_deal(convo, offer: dict, maker, taker, now: int):
@@ -180,21 +185,42 @@ def _close_deal(convo, offer: dict, maker, taker, now: int):
     return trade.settle(buyer, seller, item, quantity, price, now), None
 
 
-def _apply_replan(plan: dict, me, other, now: int, relations: Relations) -> None:
+def apply_plan(plan: dict, agent, now: int, people) -> dict:
+    """Apply a planner's answer to `agent`: validated schedule edits and
+    the memory. Shared by the after-conversation and wake-up planners.
+    Returns what happened, for the record."""
+    applied, rejected = [], []
+    if plan.get("change") and plan.get("ops"):
+        agent.daily_plan, applied, rejected = schedule.apply_ops(
+            agent.daily_plan, plan["ops"], now, workplace=agent.workplace,
+            places=village_map.buildings, people=[p for p in people if p != agent.name])
+    memory = plan.get("memory")
+    text = memory.get("text") if isinstance(memory, dict) else None
+    if isinstance(text, str) and text.strip():
+        try:
+            importance = max(1, min(3, int(memory.get("importance") or 1)))
+        except (TypeError, ValueError):
+            importance = 1
+        remember(agent, now, text.strip(), importance)
+    return {"who": agent.name, "applied": applied, "rejected": rejected,
+            "memory": text.strip() if isinstance(text, str) and text.strip() else None}
+
+
+def _apply_replan(plan: dict, me, other, now: int, relations: Relations, people) -> dict:
+    record = apply_plan(plan, me, now, people)
     row = relations.get(me.id, other.id)
     row.last_talk_tick = now
-    step = max(-AFFINITY_STEP, min(AFFINITY_STEP, int(plan.get("affinity") or 0)))
+    try:
+        step = max(-AFFINITY_STEP, min(AFFINITY_STEP, int(plan.get("affinity") or 0)))
+    except (TypeError, ValueError):
+        step = 0
     row.affinity = max(AFFINITY_RANGE[0], min(AFFINITY_RANGE[1], (row.affinity or 0) + step))
-    memory = plan.get("memory")
-    if memory and isinstance(memory.get("text"), str) and memory["text"].strip():
-        importance = max(1, min(3, int(memory.get("importance") or 1)))
-        remember(me, now, memory["text"].strip(), importance)
-    # Schedule edits (plan["ops"]) arrive with the Claude replanner in
-    # stage 3, together with their validation; templates never send any.
+    return {**record, "affinity": step}
 
 
 def _at_leisure(block) -> bool:
-    return bool(block) and block["do"] in (schedule.SOCIAL, schedule.VISIT)
+    # No block at all = free time a planner cancelled into existence.
+    return block is None or block["do"] in (schedule.SOCIAL, schedule.VISIT)
 
 
 def _receptive(partner, now: int) -> bool:
@@ -207,7 +233,7 @@ def _receptive(partner, now: int) -> bool:
 
 
 def _clean(turn) -> dict:
-    """Turns come from a model in stage 3: keep only well-formed fields."""
+    """Turns may come from a model: keep only well-formed fields."""
     turn = turn if isinstance(turn, dict) else {}
     line = turn.get("line")
     offer = turn.get("offer")
