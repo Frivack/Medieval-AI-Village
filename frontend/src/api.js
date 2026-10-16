@@ -14,6 +14,9 @@ export const fetchTime = () => getJSON("/time");
 // notable=true: trades and dialogue only, filtered server-side (see main.py).
 export const fetchHistory = (limit = 40) => getJSON(`/history?limit=${limit}&notable=true`);
 export const fetchStatus = () => getJSON("/status");
+// Newest first: the active ones plus the last few that ended, with lines,
+// offers, deals and what each side made of it afterwards.
+export const fetchConversations = (limit = 10) => getJSON(`/conversations?limit=${limit}`);
 
 export async function advanceTicks(count = 1) {
   const res = await fetch(`/tick?count=${count}`, { method: "POST" });

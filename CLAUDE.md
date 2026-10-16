@@ -251,6 +251,31 @@ entry per agent, includes `workplace`):
     cost per model price (Opus 5.5 cache reads are 0.05× input, the
     others 0.1×); `GET /status` shows it under `llm`.
 
+### Frontend (`frontend/`, React + Vite; `frontend/dist` is committed)
+- `App.jsx` polls every 2 s: `/villagers`, `/time`, `/history?notable`,
+  `/conversations?limit=10` (active ones plus the last few that ended).
+- **Map** (`MapCanvas.jsx`): static tiles drawn once to an offscreen
+  canvas, villagers redrawn on change. `layout.js` spreads villagers who
+  share a tile (everyone inside a building stands on its interior tile in
+  the sim) around it by name — presentation only — and puts the lower
+  row's name tags below them.
+- **Speech bubbles** (`SpeechBubbles.jsx`, stage 4): HTML over the canvas,
+  placed in percent of the map so they scale with it. A bubble is the
+  newest line of a conversation when it was said on the current tick, so
+  on the live server each line stays up for one tick (60 s). Up to 3 lines
+  of text, an offer chip (drawn coin, not an emoji — 🪙 rendered as a box
+  here) and accept/refuse chip; nearby bubbles stack upwards, bubbles open
+  downwards near the top edge and anchor to the side near the left/right
+  edges. `aria-hidden` — the panel carries the same lines.
+- **Talking now** (`ConversationPanel.jsx`, stage 4): top of the sidebar;
+  each active conversation grows one line per tick with chips for offers
+  (unit price in plain copper), accept/refuse, the settled deal and why a
+  deal fell through; `aria-live`. When nobody talks it says so and keeps
+  the last conversation folded underneath.
+- Checked in the browser preview in template mode: bubble tail on the
+  speaker, a second bubble stacks 6 px above, no horizontal scroll at
+  375 px.
+
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
   This rate was chosen to balance historical plausibility against
@@ -474,7 +499,11 @@ low) showed:
      every amount a model reads keeps the coins and adds the copper total
      and unit price (§3 Currency); the next paid Opus day had 0 wrong
      unit prices in dialogue (4 before).
-4. Frontend: bubbles + live panel first.
+4. a) ~~Frontend: bubbles + live panel.~~ ✅ 2026-10-16 (see §3
+   Frontend). No backend change — `/conversations` already had it all.
+   b) Next, as designed: a scene-grouped log, then a villager detail view
+   (schedule timeline with the AI's `why`, needs, relationships,
+   memories).
 5. Deploy to a dedicated instance: server-driven ticks every 60 s, manual
    ticks off.
 

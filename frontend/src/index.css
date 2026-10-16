@@ -70,7 +70,57 @@ body {
   background: var(--panel); border: 2px solid var(--panel-edge);
   border-radius: 6px; padding: 0.6rem;
 }
+.map-stage { position: relative; }
 .map-canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+
+/* ---- speech bubbles (HTML over the canvas, see SpeechBubbles.jsx) ---- */
+.bubble-layer { position: absolute; inset: 0; pointer-events: none; }
+.bubble {
+  --gap: 6px;
+  position: absolute;
+  max-width: min(15rem, 42%);
+  width: max-content;
+  display: flex; flex-direction: column; gap: 0.2rem;
+  padding: 0.35rem 0.55rem;
+  background: var(--parchment); color: #2a2018;
+  border-radius: 8px;
+  border-left: 3px solid var(--accent, var(--gold));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  font-size: 0.74rem; line-height: 1.3;
+  transform: translate(-50%, calc(-100% * (1 + var(--level)) - var(--level) * var(--gap)));
+  animation: bubble-in 0.25s ease-out;
+}
+.bubble.below { transform: translate(-50%, calc(100% * var(--level) + var(--level) * var(--gap))); }
+.bubble.align-left { transform: translate(-12%, calc(-100% * (1 + var(--level)) - var(--level) * var(--gap))); }
+.bubble.align-right { transform: translate(-88%, calc(-100% * (1 + var(--level)) - var(--level) * var(--gap))); }
+.bubble.below.align-left { transform: translate(-12%, calc(100% * var(--level) + var(--level) * var(--gap))); }
+.bubble.below.align-right { transform: translate(-88%, calc(100% * var(--level) + var(--level) * var(--gap))); }
+/* the tail, pointing at the speaker */
+.bubble::after {
+  content: ""; position: absolute; left: calc(50% - 5px); bottom: -5px;
+  border: 5px solid transparent; border-bottom: 0; border-top-color: var(--parchment);
+}
+.bubble.align-left::after { left: calc(12% - 5px); }
+.bubble.align-right::after { left: calc(88% - 5px); }
+.bubble.below::after { top: -5px; bottom: auto; border: 5px solid transparent; border-top: 0; border-bottom-color: var(--parchment); }
+.bubble-text {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.bubble-chip {
+  align-self: flex-start;
+  font-size: 0.66rem; padding: 0.05rem 0.4rem; border-radius: 999px;
+  background: #d8c69c; color: #3d2f1f; white-space: nowrap;
+}
+/* a drawn coin instead of an emoji, which not every font has */
+.bubble-chip.coin::before {
+  content: ""; display: inline-block; width: 0.55rem; height: 0.55rem;
+  margin-right: 0.25rem; vertical-align: -0.05rem;
+  border-radius: 50%; background: var(--gold); box-shadow: inset 0 0 0 1px #9c7f2e;
+}
+.bubble-chip.accept { background: #cfe0b8; color: #2f4a1c; }
+.bubble-chip.reject { background: #ecc6bd; color: #5a2216; }
+@keyframes bubble-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .bubble { animation: none; } }
 .map-loading { padding: 3rem; text-align: center; color: var(--muted); }
 
 .sidebar {
@@ -78,6 +128,41 @@ body {
   display: flex; flex-direction: column; gap: 0.9rem;
   max-height: calc(100vh - 5.5rem);
 }
+
+/* ---- talking now (ConversationPanel.jsx) ---- */
+.talk-panel {
+  background: var(--panel); border: 1px solid var(--panel-edge);
+  border-radius: 6px; padding: 0.7rem;
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.talk-panel h2 { font-size: 0.9rem; color: var(--muted); }
+.talk-panel .empty { color: var(--muted); font-size: 0.8rem; }
+.talk { display: flex; flex-direction: column; gap: 0.35rem; }
+.talk + .talk { border-top: 1px solid var(--panel-edge); padding-top: 0.5rem; }
+.talk-head { display: flex; flex-direction: column; gap: 0.1rem; }
+.talk-head strong { font-size: 0.9rem; }
+.talk-meta { color: var(--muted); font-size: 0.7rem; }
+.talk-lines {
+  list-style: none; display: flex; flex-direction: column; gap: 0.4rem;
+  max-height: 16rem; overflow-y: auto;
+}
+.talk-line { font-size: 0.78rem; line-height: 1.35; display: flex; flex-direction: column; gap: 0.15rem; }
+.talk-speaker {
+  font-weight: bold; font-size: 0.72rem;
+  padding-left: 0.4rem; border-left: 3px solid var(--accent, var(--gold));
+}
+.talk-text { padding-left: 0.4rem; }
+.talk-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; padding-left: 0.4rem; }
+.chip {
+  font-size: 0.66rem; padding: 0.05rem 0.45rem; border-radius: 999px;
+  background: var(--panel-edge); color: var(--parchment);
+}
+.chip.offer { color: var(--gold); }
+.chip.accept, .chip.deal { color: var(--green); }
+.chip.reject { color: var(--red); }
+.talk-last summary { cursor: pointer; color: var(--muted); font-size: 0.75rem; }
+.talk-last summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.talk-last[open] summary { margin-bottom: 0.4rem; }
 
 /* ---- villager cards ---- */
 .villager-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }

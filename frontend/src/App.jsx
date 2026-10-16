@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { advanceTicks, fetchHistory, fetchMap, fetchStatus, fetchTime, fetchVillagers } from "./api.js";
+import { advanceTicks, fetchConversations, fetchHistory, fetchMap, fetchStatus, fetchTime,
+         fetchVillagers } from "./api.js";
 import ControlBar from "./components/ControlBar.jsx";
+import ConversationPanel from "./components/ConversationPanel.jsx";
 import HistoryFeed from "./components/HistoryFeed.jsx";
-import MapCanvas from "./components/MapCanvas.jsx";
+import MapCanvas, { JOB_COLORS } from "./components/MapCanvas.jsx";
 import VillagerPanel from "./components/VillagerPanel.jsx";
 
 const POLL_MS = 2000;      // background refresh (catches ticks from the server loop / other clients)
@@ -14,6 +16,7 @@ export default function App() {
   const [villagers, setVillagers] = useState([]);
   const [time, setTime] = useState(null);
   const [history, setHistory] = useState([]);
+  const [conversations, setConversations] = useState([]);
   const [busy, setBusy] = useState(false);
   const [autoRun, setAutoRun] = useState(false);
   const [error, setError] = useState(null);
@@ -21,12 +24,13 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [v, t, h] = await Promise.all([
-        fetchVillagers(), fetchTime(), fetchHistory(60),
+      const [v, t, h, c] = await Promise.all([
+        fetchVillagers(), fetchTime(), fetchHistory(60), fetchConversations(10),
       ]);
       setVillagers(v);
       setTime(t);
       setHistory(h);
+      setConversations(c);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -73,6 +77,25 @@ export default function App() {
     [villagers]
   );
 
+  const colorByName = useMemo(
+    () => Object.fromEntries(villagers.map((v) => [v.name, JOB_COLORS[v.job]])),
+    [villagers]
+  );
+
+  // A bubble for every line said on the current tick — the newest line of
+  // each conversation, active or just ended (a goodbye still shows).
+  const bubbles = useMemo(() => {
+    if (!time) return [];
+    const byName = Object.fromEntries(villagers.map((v) => [v.name, v]));
+    return conversations.flatMap((c) => {
+      const line = c.lines?.at(-1);
+      const speaker = line && byName[line.speaker];
+      if (!speaker || line.tick !== time.tick) return [];
+      return [{ key: `${c.id}:${line.tick}`, speakerId: speaker.id, line,
+                color: JOB_COLORS[speaker.job] }];
+    });
+  }, [conversations, time, villagers]);
+
   return (
     <div className="app">
       <ControlBar
@@ -86,9 +109,10 @@ export default function App() {
       {error && <div className="error-banner">{error}</div>}
       <main className="layout">
         <div className="map-wrap">
-          <MapCanvas map={map} villagers={villagers} />
+          <MapCanvas map={map} villagers={villagers} bubbles={bubbles} />
         </div>
         <aside className="sidebar">
+          <ConversationPanel conversations={conversations} colors={colorByName} />
           <VillagerPanel villagers={villagers} />
           <HistoryFeed history={history} nameById={nameById}
                        minutesPerTick={status?.minutes_per_tick} />

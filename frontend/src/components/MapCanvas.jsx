@@ -1,10 +1,13 @@
 import { useEffect, useRef } from "react";
+import { displayPositions } from "../layout.js";
+import SpeechBubbles from "./SpeechBubbles.jsx";
 
 // Canvas renderer for the village. 100x50 = 5,000 tiles redrawn per
 // frame is trivial for canvas, whereas 5,000 DOM nodes would be slow —
-// that's why this is a <canvas> and not a CSS grid.
+// that's why this is a <canvas> and not a CSS grid. Speech bubbles are
+// HTML on top of it (wrapping text is what the browser is good at).
 
-const SCALE = 12; // canvas pixels per tile
+export const SCALE = 12; // canvas pixels per tile
 
 const TILE_COLORS = {
   grass: "#5c8a4e",
@@ -17,16 +20,17 @@ const TILE_COLORS = {
   bridge: "#9c7f57",
 };
 
-const JOB_COLORS = {
+export const JOB_COLORS = {
   Farmer: "#e0c94f",
   Blacksmith: "#c94f4f",
   Merchant: "#9f5fd0",
   Innkeeper: "#4fb6c9",
 };
 
-export default function MapCanvas({ map, villagers }) {
+export default function MapCanvas({ map, villagers, bubbles = [] }) {
   const canvasRef = useRef(null);
   const baseRef = useRef(null); // offscreen canvas with the static tiles
+  const positions = displayPositions(villagers, map?.buildings);
 
   // Draw the static map once (it never changes).
   useEffect(() => {
@@ -53,33 +57,39 @@ export default function MapCanvas({ map, villagers }) {
       ctx.fillText(b.name, cx, cy);
     }
     baseRef.current = base;
-    drawFrame(canvasRef.current, base, villagers);
+    drawFrame(canvasRef.current, base, villagers, positions);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map]);
 
   // Redraw agents whenever they move.
   useEffect(() => {
-    if (baseRef.current) drawFrame(canvasRef.current, baseRef.current, villagers);
+    if (baseRef.current) drawFrame(canvasRef.current, baseRef.current, villagers, positions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [villagers]);
 
   if (!map) return <div className="map-loading">Loading map…</div>;
   return (
-    <canvas
-      ref={canvasRef}
-      className="map-canvas"
-      width={map.width * SCALE}
-      height={map.height * SCALE}
-    />
+    <div className="map-stage">
+      <canvas
+        ref={canvasRef}
+        className="map-canvas"
+        width={map.width * SCALE}
+        height={map.height * SCALE}
+      />
+      <SpeechBubbles bubbles={bubbles} positions={positions}
+                     width={map.width} height={map.height} />
+    </div>
   );
 }
 
-function drawFrame(canvas, base, villagers) {
+function drawFrame(canvas, base, villagers, positions) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   ctx.drawImage(base, 0, 0);
   for (const v of villagers) {
-    const px = v.x * SCALE + SCALE / 2;
-    const py = v.y * SCALE + SCALE / 2;
+    const pos = positions.get(v.id);
+    const px = pos.x * SCALE;
+    const py = pos.y * SCALE;
     ctx.beginPath();
     ctx.arc(px, py, SCALE * 0.55, 0, Math.PI * 2);
     ctx.fillStyle = JOB_COLORS[v.job] ?? "#fff";
@@ -87,11 +97,15 @@ function drawFrame(canvas, base, villagers) {
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = "#1d1a16";
     ctx.stroke();
+    // Name tag above, or below for the lower row of a group, so a crowd
+    // at the Inn doesn't stack four tags on top of each other.
     ctx.font = "bold 10px sans-serif";
     ctx.textAlign = "center";
+    const w = ctx.measureText(v.name).width + 8;
+    const top = pos.labelBelow ? py + SCALE * 0.75 : py - SCALE * 1.75;
     ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(px - 24, py - SCALE * 1.9, 48, 12);
+    ctx.fillRect(px - w / 2, top, w, 12);
     ctx.fillStyle = "#fff";
-    ctx.fillText(v.name, px, py - SCALE * 1.1);
+    ctx.fillText(v.name, px, top + 9.5);
   }
 }
