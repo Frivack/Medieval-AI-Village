@@ -21,6 +21,12 @@ def tick_at(day: int, hour: int, minute: int = 0) -> int:
     return (day - 1) * TICKS_PER_DAY + hour * TICKS_PER_HOUR + minute // MINUTES_PER_TICK
 
 
+def tick_for_time_of_day(now) -> int:
+    """Day 1 at `now`'s time of day (a datetime): where a new world starts
+    when its clock should match the real one (config.START_AT_LOCAL_TIME)."""
+    return tick_at(1, now.hour, now.minute)
+
+
 def format_clock(tick: int) -> str:
     t = game_time(tick)
     return f"Day {t['day']} {t['hour']:02d}:{t['minute']:02d}"

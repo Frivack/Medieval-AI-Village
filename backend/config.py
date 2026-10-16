@@ -74,3 +74,9 @@ TICK_INTERVAL_SECONDS = float(os.getenv("TICK_INTERVAL_SECONDS", "0"))
 # POST /tick lets any caller advance time, and every tick costs LLM calls.
 # On for local dev; set MANUAL_TICK_ENABLED=0 on the public server.
 MANUAL_TICK_ENABLED = os.getenv("MANUAL_TICK_ENABLED", "1").lower() not in ("0", "false", "off")
+# A brand-new world starts on Day 1 at the server's current local time of
+# day instead of 00:00, so with real-time ticks the village sleeps when its
+# visitors do. Only read when the world is created (agents loaded into an
+# empty DB); an existing world keeps its clock. The deploy box runs on
+# Asia/Seoul time.
+START_AT_LOCAL_TIME = os.getenv("VILLAGE_START_AT_LOCAL_TIME", "0").lower() in ("1", "true", "on")

@@ -215,6 +215,10 @@ entry per agent, includes `workplace`):
   reports both settings; the frontend swaps the tick buttons for a LIVE
   badge when manual ticking is off. Single uvicorn worker only — each
   worker would run its own loop.
+  `VILLAGE_START_AT_LOCAL_TIME=1` makes a brand-new world (agents loaded
+  into an empty DB, `agents/loader.py`) start on Day 1 at the server's
+  local time of day instead of 00:00, so a real-time village sleeps when
+  its visitors do; an existing world keeps its clock.
 
 ### LLM integration
 - `backend/llm/client.py` — OpenAI-compatible `/chat/completions` via httpx.
