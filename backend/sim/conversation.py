@@ -32,6 +32,13 @@ AFFINITY_STEP = 2                     # the most a planner can move it per conve
 NEGATIVE_WEIGHT = 3
 
 
+def affinity_level(a: int) -> str:
+    """Where a score sits on the scale. One place for the thresholds: the
+    prompts turn it into a feeling, the API shows it as a label."""
+    return ("dislike" if a <= -15 else "wary" if a <= -5 else "neutral" if a < 5
+            else "like" if a < 20 else "close friend")
+
+
 class Relations:
     """The relationships table, loaded once per tick; rows made on demand."""
 

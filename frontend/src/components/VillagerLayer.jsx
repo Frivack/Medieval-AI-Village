@@ -6,7 +6,9 @@ import { JOB_COLORS } from "../colors.js";
 // but stays sharp at any zoom. Where each villager stands on screen comes
 // from layout.js (people sharing a tile spread out around it).
 
-export default function VillagerLayer({ map, villagers, positions }) {
+// A villager's dot and tag carry data-villager: MapView reads it to open
+// their details on a tap. The selected one gets a ring.
+export default function VillagerLayer({ map, villagers, positions, selectedId }) {
   const at = (x, y) => ({ left: `${(x / map.width) * 100}%`, top: `${(y / map.height) * 100}%` });
   return (
     <div className="people-layer">
@@ -18,7 +20,8 @@ export default function VillagerLayer({ map, villagers, positions }) {
       {villagers.map((v) => {
         const pos = positions.get(v.id);
         return (
-          <div key={v.id} className="villager" style={at(pos.x, pos.y)}>
+          <div key={v.id} className={`villager${v.id === selectedId ? " selected" : ""}`}
+               style={at(pos.x, pos.y)} data-villager={v.id} title={`${v.name} — click for details`}>
             <span className="villager-dot" style={{ background: JOB_COLORS[v.job] ?? "#fff" }} />
             {/* Above the head, or below for the lower row of a group, so a
                 crowd at the Inn doesn't stack four tags on top of each other. */}

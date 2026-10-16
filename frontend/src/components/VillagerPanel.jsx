@@ -7,8 +7,8 @@ const STATUS_ICON = {
 };
 
 // A 0-100 gauge. `bad` marks the end that means trouble: hunger is bad
-// when high, a tool's condition when low.
-function Gauge({ label, value, bad }) {
+// when high, a tool's condition when low. Shared with the detail view.
+export function Gauge({ label, value, bad }) {
   const v = Math.max(0, Math.min(100, value));
   const alarm = bad === "high" ? v >= 50 : v <= 25;
   return (
@@ -28,11 +28,19 @@ function activityText(a) {
   return `${a.do} @ ${a.at}${who} until ${a.until}`;
 }
 
-export default function VillagerPanel({ villagers }) {
+// Each card opens that villager's detail view (click, Enter or Space).
+export default function VillagerPanel({ villagers, onSelect }) {
   return (
     <section className="villager-panel">
       {villagers.map((v) => (
-        <article className="villager-card" key={v.id}>
+        <article
+          className="villager-card" key={v.id}
+          role="button" tabIndex={0} aria-label={`${v.name}, ${v.job}: open details`}
+          onClick={() => onSelect(v.id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(v.id); }
+          }}
+        >
           <div className="card-head">
             <strong>{v.name}</strong>
             <span className="job">{v.job}</span>

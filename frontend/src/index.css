@@ -127,6 +127,10 @@ body {
   background: rgba(0, 0, 0, 0.55); white-space: nowrap;
 }
 .villager-name.below { top: 0.75cqw; }
+/* dots and tags take taps (MapView turns a tap into "open details") */
+.villager-dot, .villager-name { pointer-events: auto; cursor: pointer; }
+.villager.selected .villager-dot { box-shadow: 0 0 0 0.3cqw var(--gold); }
+.villager.selected .villager-name { color: var(--gold); }
 
 /* ---- speech bubbles (HTML over the canvas, see SpeechBubbles.jsx) ----
    Sized in map units and smaller than a house (the Inn is 8 tiles wide):
@@ -223,7 +227,87 @@ body {
 .villager-card {
   background: var(--panel); border: 1px solid var(--panel-edge);
   border-radius: 6px; padding: 0.55rem 0.65rem; font-size: 0.8rem;
+  cursor: pointer;
 }
+.villager-card:hover { border-color: #5c4f3e; }
+.villager-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+/* ---- villager detail (VillagerDetail.jsx) ---- */
+.villager-detail {
+  background: var(--panel); border: 1px solid var(--panel-edge);
+  border-radius: 6px; padding: 0.7rem;
+  display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem;
+  /* taller than the sidebar: shrink and scroll inside it, so the log
+     below stays in view (min-height overrides the flex default "auto") */
+  min-height: 14rem; overflow-y: auto; flex-shrink: 1;
+}
+.villager-detail > * { flex-shrink: 0; }
+.villager-detail h3 {
+  font-size: 0.7rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;
+  margin-top: 0.35rem; border-bottom: 1px solid var(--panel-edge); padding-bottom: 0.15rem;
+}
+.villager-detail .empty, .muted { color: var(--muted); }
+.detail-back {
+  align-self: flex-start; font: inherit; font-size: 0.75rem;
+  background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0;
+}
+.detail-back:hover { color: var(--parchment); }
+.detail-back:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.detail-head { display: flex; flex-direction: column; gap: 0.3rem; }
+.detail-head h2 {
+  font-size: 1.1rem; padding-left: 0.45rem; border-left: 4px solid var(--accent, var(--gold));
+}
+.detail-personality { font-style: italic; color: var(--muted); font-size: 0.75rem; line-height: 1.35; }
+
+/* the 24-hour bars: one colour per activity, the villager's own plans dashed */
+.seg-work { background: #a8834a; }
+.seg-social { background: #7a5ea6; }
+.seg-sleep { background: #3d5677; }
+.seg-visit { background: #4c8a6a; }
+.day-bar { display: grid; grid-template-columns: 3.4rem 1fr; gap: 0.1rem 0.4rem; align-items: center; }
+.day-bar-label { font-size: 0.7rem; color: var(--muted); }
+.day-bar-track {
+  position: relative; height: 1rem; border-radius: 3px; overflow: hidden;
+  background: var(--panel-edge);
+}
+.seg { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--panel); }
+.seg.ai { box-shadow: inset 0 0 0 2px var(--gold); background-image: repeating-linear-gradient(
+  45deg, transparent 0 4px, rgba(255, 255, 255, 0.18) 4px 7px); }
+.day-bar-past {
+  position: absolute; top: 0; bottom: 0; left: 0; z-index: 1;
+  background: repeating-linear-gradient(45deg, rgba(29, 26, 22, 0.75) 0 3px, rgba(29, 26, 22, 0.55) 3px 6px);
+}
+.day-bar-now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--red); z-index: 2; }
+.day-bar-hours {
+  grid-column: 2; display: flex; justify-content: space-between;
+  font-size: 0.6rem; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.seg-legend { display: flex; flex-wrap: wrap; gap: 0.2rem 0.7rem; font-size: 0.66rem; color: var(--muted); }
+.seg-legend i { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 2px; margin-right: 0.25rem; vertical-align: -0.05rem; }
+.seg-legend .legend-ai { box-shadow: inset 0 0 0 2px var(--gold); }
+.detail-blocks { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
+.detail-blocks li { display: flex; flex-direction: column; gap: 0.1rem; padding-left: 0.4rem; border-left: 2px solid var(--panel-edge); }
+.detail-blocks li.ai { border-left-color: var(--gold); }
+.detail-blocks li.current { background: rgba(224, 201, 79, 0.06); }
+.detail-blocks .chip { margin-left: 0.35rem; }
+.block-time { font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.block-why { font-style: italic; color: #d9c9a0; font-size: 0.75rem; }
+
+.detail-relations { list-style: none; display: flex; flex-direction: column; gap: 0.45rem; }
+.detail-relations li { display: grid; grid-template-columns: 4.6rem 1fr; gap: 0.15rem 0.5rem; align-items: center; }
+.rel-name { font-weight: bold; padding-left: 0.35rem; border-left: 3px solid var(--accent, var(--gold)); }
+.aff-track { position: relative; height: 0.45rem; background: var(--panel-edge); border-radius: 2px; }
+.aff-track::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--muted); }
+.aff-fill { position: absolute; top: 0; bottom: 0; }
+.aff-fill.warm { background: var(--green); }
+.aff-fill.cold { background: var(--red); }
+.rel-text { grid-column: 1 / -1; font-size: 0.72rem; }
+
+.detail-memories { list-style: none; display: flex; flex-direction: column; gap: 0.4rem; }
+.detail-memories li { display: flex; flex-direction: column; gap: 0.1rem; font-size: 0.76rem; line-height: 1.35; }
+.mem-meta { display: flex; gap: 0.4rem; font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mem-importance { color: var(--gold); letter-spacing: 0.05em; }
+.mem-told { font-size: 0.66rem; }
 .card-head { display: flex; justify-content: space-between; align-items: baseline; }
 .card-head strong { font-size: 0.95rem; }
 .job { color: var(--muted); font-size: 0.72rem; }
@@ -243,26 +327,46 @@ body {
   padding: 0.05rem 0.35rem; font-size: 0.7rem; color: var(--parchment);
 }
 
-/* ---- history ---- */
-.history-feed {
+/* ---- village log: one scene per finished conversation (SceneLog.jsx) ---- */
+.scene-log {
   background: var(--panel); border: 1px solid var(--panel-edge);
   border-radius: 6px; padding: 0.7rem;
   overflow-y: auto; flex: 1; min-height: 8rem;
+  display: flex; flex-direction: column; gap: 0.6rem;
 }
-.history-feed h2 { font-size: 0.9rem; color: var(--muted); margin-bottom: 0.5rem; }
-.history-feed .empty { color: var(--muted); font-size: 0.8rem; }
-.history-feed ul { list-style: none; }
-.history-feed li {
-  font-size: 0.78rem; padding: 0.25rem 0;
-  border-bottom: 1px solid #332d25;
-  display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap;
+.scene-log h2 { font-size: 0.9rem; color: var(--muted); }
+.scene-log .empty { color: var(--muted); font-size: 0.8rem; }
+.scene-day { display: flex; flex-direction: column; gap: 0.35rem; }
+.scene-day h3 {
+  font-size: 0.7rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;
+  border-bottom: 1px solid var(--panel-edge); padding-bottom: 0.15rem;
 }
-.ev-time { color: var(--muted); font-size: 0.7rem; white-space: nowrap; }
-.ev-agent { font-weight: bold; }
-.ev-dialogue { font-style: italic; }
-.gain { color: var(--green); }
-.spend { color: var(--red); }
-.ev-action { color: var(--muted); }
+.scene { border-bottom: 1px solid #332d25; padding-bottom: 0.35rem; }
+.scene > summary {
+  cursor: pointer; list-style: none;
+  display: flex; flex-direction: column; gap: 0.25rem;
+}
+.scene > summary::-webkit-details-marker { display: none; }
+.scene > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.scene-head { display: flex; flex-wrap: wrap; gap: 0.2rem 0.5rem; align-items: baseline; font-size: 0.8rem; }
+.scene-head::before { content: "▸"; color: var(--muted); font-size: 0.7rem; }
+.scene[open] .scene-head::before { content: "▾"; }
+.scene-time { color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.scene-meta { color: var(--muted); font-size: 0.72rem; }
+.scene .talk-lines { margin-top: 0.45rem; max-height: none; }
+.chip.plan { color: #c9b6f0; }
+.scene-memories {
+  list-style: none; margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.2rem;
+  font-size: 0.74rem; color: var(--muted); font-style: italic;
+}
+.scene-memories strong { font-style: normal; color: var(--parchment); }
+.scene-end { margin-top: 0.3rem; font-size: 0.68rem; color: var(--muted); }
+.scene-more {
+  align-self: center; font: inherit; font-size: 0.78rem;
+  padding: 0.3rem 0.8rem; background: var(--panel-edge); color: var(--parchment);
+  border: 1px solid #55483a; border-radius: 4px; cursor: pointer;
+}
+.scene-more:hover { background: #4a4133; }
 
 /* ---- small screens ---- */
 @media (max-width: 900px) {

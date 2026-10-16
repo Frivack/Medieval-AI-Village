@@ -1,37 +1,48 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { advanceTicks, fetchConversations, fetchHistory, fetchMap, fetchStatus, fetchTime,
-         fetchVillagers } from "./api.js";
+import { advanceTicks, fetchConversations, fetchMap, fetchStatus, fetchTime,
+         fetchVillager, fetchVillagers } from "./api.js";
 import ControlBar from "./components/ControlBar.jsx";
 import ConversationPanel from "./components/ConversationPanel.jsx";
-import HistoryFeed from "./components/HistoryFeed.jsx";
 import MapView from "./components/MapView.jsx";
+import SceneLog from "./components/SceneLog.jsx";
 import { JOB_COLORS } from "./colors.js";
+import VillagerDetail from "./components/VillagerDetail.jsx";
 import VillagerPanel from "./components/VillagerPanel.jsx";
 
 const POLL_MS = 2000;      // background refresh (catches ticks from the server loop / other clients)
 const AUTO_TICK_MS = 700;  // pace of the ▶ Auto mode
+const SCENES_PAGE = 20;    // conversations fetched at first and per "Show older scenes"
 
 export default function App() {
   const [map, setMap] = useState(null);
   const [status, setStatus] = useState(null); // how this server advances time
   const [villagers, setVillagers] = useState([]);
   const [time, setTime] = useState(null);
-  const [history, setHistory] = useState([]);
   const [conversations, setConversations] = useState([]);
   const [busy, setBusy] = useState(false);
   const [autoRun, setAutoRun] = useState(false);
   const [error, setError] = useState(null);
   const ticking = useRef(false); // prevents overlapping /tick requests
+  // How many conversations to fetch: one list feeds the bubbles, "Talking
+  // now" and the scene log; "Show older scenes" raises it.
+  const sceneLimit = useRef(SCENES_PAGE);
+  // The villager whose detail view is open (a card or their dot on the map
+  // was clicked), and their full record, refreshed with everything else.
+  const [selectedId, setSelectedId] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const selectedRef = useRef(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [v, t, h, c] = await Promise.all([
-        fetchVillagers(), fetchTime(), fetchHistory(60), fetchConversations(10),
+      const id = selectedRef.current;
+      const [v, t, c, d] = await Promise.all([
+        fetchVillagers(), fetchTime(), fetchConversations(sceneLimit.current),
+        id ? fetchVillager(id) : null,
       ]);
       setVillagers(v);
       setTime(t);
-      setHistory(h);
       setConversations(c);
+      if (id && selectedRef.current === id) setDetail(d);   // ignore if closed meanwhile
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -73,10 +84,18 @@ export default function App() {
     return () => clearInterval(id);
   }, [autoRun, onAdvance]);
 
-  const nameById = useMemo(
-    () => Object.fromEntries(villagers.map((v) => [v.id, v.name])),
-    [villagers]
-  );
+  const select = useCallback((id) => {
+    selectedRef.current = id;
+    setSelectedId(id);
+    setDetail(null);
+    if (id) refresh();
+  }, [refresh]);
+  const closeDetail = useCallback(() => select(null), [select]);
+
+  const showOlderScenes = useCallback(() => {
+    sceneLimit.current += SCENES_PAGE;
+    refresh();
+  }, [refresh]);
 
   const colorByName = useMemo(
     () => Object.fromEntries(villagers.map((v) => [v.name, JOB_COLORS[v.job]])),
@@ -110,13 +129,18 @@ export default function App() {
       {error && <div className="error-banner">{error}</div>}
       <main className="layout">
         <div className="map-wrap">
-          <MapView map={map} villagers={villagers} bubbles={bubbles} />
+          <MapView map={map} villagers={villagers} bubbles={bubbles}
+                   selectedId={selectedId} onSelect={select} />
         </div>
         <aside className="sidebar">
           <ConversationPanel conversations={conversations} colors={colorByName} />
-          <VillagerPanel villagers={villagers} />
-          <HistoryFeed history={history} nameById={nameById}
-                       minutesPerTick={status?.minutes_per_tick} />
+          {selectedId
+            ? <VillagerDetail detail={detail} colors={colorByName}
+                              minutesPerTick={status?.minutes_per_tick} onBack={closeDetail} />
+            : <VillagerPanel villagers={villagers} onSelect={select} />}
+          <SceneLog conversations={conversations} colors={colorByName}
+                    onMore={showOlderScenes}
+                    hasMore={conversations.length >= sceneLimit.current} />
         </aside>
       </main>
     </div>

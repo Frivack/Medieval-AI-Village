@@ -20,6 +20,7 @@ import VillagerLayer from "./VillagerLayer.jsx";
 const MIN_ZOOM = 1;      // the whole map, as before
 const MAX_ZOOM = 4;
 const BUTTON_STEP = 1.5;
+const TAP_SLOP = 5;      // px a press may move and still count as a tap, not a drag
 
 const clampZoom = (z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
@@ -28,10 +29,13 @@ function clampView(v, { w, h }) {
   return { z, x: Math.min(0, Math.max(w - w * z, v.x)), y: Math.min(0, Math.max(h - h * z, v.y)) };
 }
 
-export default function MapView({ map, villagers, bubbles = [] }) {
+export default function MapView({ map, villagers, bubbles = [], selectedId, onSelect }) {
   const viewportRef = useRef(null);
   const size = useRef({ w: 1, h: 1 });
   const pointers = useRef(new Map());   // pointerId -> last {x, y}, for drag and pinch
+  // A press that hasn't moved yet: {id, x, y, villager}. Lifting it there
+  // is a tap, which opens the villager under it; moving turns it into a drag.
+  const tap = useRef(null);
   const [view, setView] = useState({ z: 1, x: 0, y: 0 });
 
   // Zoom by `factor`, keeping the map point under (cx, cy) where it is.
@@ -74,6 +78,10 @@ export default function MapView({ map, villagers, bubbles = [] }) {
 
   const onPointerDown = (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    // Read the target before capturing: capture redirects later events.
+    const villager = e.target.closest?.("[data-villager]")?.dataset.villager ?? null;
+    tap.current = pointers.current.size === 0
+      ? { id: e.pointerId, x: e.clientX, y: e.clientY, villager } : null;   // a 2nd finger: no tap
     // Keep receiving moves when the pointer leaves the map mid-drag.
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -82,6 +90,8 @@ export default function MapView({ map, villagers, bubbles = [] }) {
   const onPointerMove = (e) => {
     const pts = pointers.current;
     if (!pts.has(e.pointerId)) return;
+    const t = tap.current;
+    if (t && Math.hypot(e.clientX - t.x, e.clientY - t.y) > TAP_SLOP) tap.current = null;
     const r = viewportRef.current.getBoundingClientRect();
     if (pts.size === 1) {                                  // drag: move the map
       const last = pts.get(e.pointerId);
@@ -105,7 +115,12 @@ export default function MapView({ map, villagers, bubbles = [] }) {
     }
   };
 
-  const onPointerEnd = (e) => { pointers.current.delete(e.pointerId); };
+  const onPointerEnd = (e) => {
+    pointers.current.delete(e.pointerId);
+    const t = tap.current;
+    tap.current = null;
+    if (e.type === "pointerup" && t?.id === e.pointerId && t.villager && onSelect) onSelect(t.villager);
+  };
 
   if (!map) return <div className="map-loading">Loading map…</div>;
   const positions = displayPositions(villagers, map.buildings);
@@ -129,7 +144,8 @@ export default function MapView({ map, villagers, bubbles = [] }) {
       >
         <div className="map-stage">
           <TerrainCanvas map={map} />
-          <VillagerLayer map={map} villagers={villagers} positions={positions} />
+          <VillagerLayer map={map} villagers={villagers} positions={positions}
+                         selectedId={selectedId} />
           <SpeechBubbles bubbles={bubbles} positions={positions}
                          width={map.width} height={map.height} />
         </div>

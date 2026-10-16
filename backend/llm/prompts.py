@@ -8,7 +8,7 @@
 import json
 
 from backend.config import BASE_DIR
-from backend.sim import economy, schedule
+from backend.sim import conversation, economy, schedule
 from backend.sim.clock import format_clock
 from backend.utils.currency import with_copper
 from backend.world.map import village_map
@@ -235,11 +235,14 @@ def _tool(t: int) -> str:
             "your farming tools are broken — you can't farm without new ones")
 
 
+_FEELING = {"dislike": "you dislike them", "wary": "you're wary of them",
+            "neutral": "nothing in particular", "like": "you like them",
+            "close friend": "they're a close friend"}
+
+
 def _affinity(a: int) -> str:
-    """The -30..30 scale in words (conversation.AFFINITY_RANGE)."""
-    return ("you dislike them" if a <= -15 else "you're wary of them" if a <= -5
-            else "nothing in particular" if a < 5 else "you like them" if a < 20
-            else "they're a close friend")
+    """The -30..30 scale in words (thresholds in conversation.affinity_level)."""
+    return _FEELING[conversation.affinity_level(a)]
 
 
 def _reason(v: dict) -> str:

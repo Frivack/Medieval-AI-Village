@@ -123,8 +123,7 @@ entry per agent, includes `workplace`):
     Claude's speaker/planner have the same signatures (see §3 LLM
     integration) — the engine doesn't know which one it runs.
   - `GET /conversations?active=&limit=` returns transcripts with
-    `replans` (stage 4's live panel source); TALK lines already show in
-    the village log.
+    `replans` — the source of the bubbles, Talking now and the scene log.
 - **TRADE v2 negotiation** (`backend/sim/negotiation.py`, 2026-07-16):
   LLM seller/buyer reactions with counters clamped to 70–130% of base.
   **Unused since stage 1b** — prices come from the economy rules, and
@@ -252,8 +251,10 @@ entry per agent, includes `workplace`):
     others 0.1×); `GET /status` shows it under `llm`.
 
 ### Frontend (`frontend/`, React + Vite; `frontend/dist` is committed)
-- `App.jsx` polls every 2 s: `/villagers`, `/time`, `/history?notable`,
-  `/conversations?limit=10` (active ones plus the last few that ended).
+- `App.jsx` polls every 2 s: `/villagers`, `/time`,
+  `/conversations?limit=N` (N = 20, +20 per "Show older scenes"; one list
+  feeds the bubbles, Talking now and the scene log) and, while a detail
+  view is open, `/villagers/{id}`. `/history` is no longer polled.
 - **Map** (`MapView.jsx`) is three layers in one coordinate system, all
   inside one "world" element: `TerrainCanvas.jsx` (tiles, drawn once,
   memoized — scales up as pixel art), `VillagerLayer.jsx` (dots, name
@@ -291,10 +292,36 @@ entry per agent, includes `workplace`):
   (unit price in plain copper), accept/refuse, the settled deal and why a
   deal fell through; `aria-live`. When nobody talks it says so and keeps
   the last conversation folded underneath.
-- Checked in the browser preview in template mode: a bubble is 7×2.2
+- **Village log** (`SceneLog.jsx`, stage 4b, replaced the line-by-line
+  `HistoryFeed`): one scene per finished conversation, grouped by in-game
+  day, newest first. Folded: time, people, place, reason and chips for
+  what came of it — deals, schedule edits (`apply_ops` labels made
+  readable: "+ VISIT Smithy with Edmund, day 3 06:00–07:00"), affinity
+  moves. Unfolded: the transcript (the same `Line` as Talking now), what
+  each side will remember, how it ended.
+- **Villager detail** (`VillagerDetail.jsx`, stage 4b): opened from a card
+  (click, Enter, Space) or by tapping a villager on the map — `MapView`
+  counts a press that moves < 5 px as a tap and reads `data-villager`
+  from the element under it (before capturing the pointer); the selected
+  villager gets a gold ring. It replaces the cards in the sidebar and
+  scrolls inside it; ← All villagers or Esc closes it. Shows: profile,
+  needs, wealth, stock; two 24-hour bars (today, tomorrow) coloured by
+  activity, the villager's own blocks outlined in gold, the past shaded,
+  a red now-line, and the block list with each planned block's `why`;
+  feelings both ways as a −30..30 bar; memories with importance dots.
+  Data: `GET /villagers/{id}` (main.py) — schedule from now to the end
+  of tomorrow with `ai`/`why`/`current`, relationships with
+  `affinity`/`level` and `their_affinity`/`their_level` (it isn't
+  mutual), memories newest first with `told`. Levels come from
+  `conversation.affinity_level()`, shared with the prompts.
+- Checked in the browser preview: in template mode a bubble is 7×2.2
   tiles at 1× (the Inn 8×6) and ≈11 px text at 2×; wheel zoom keeps the
   point under the pointer, drag and the buttons work, pinch keeps its
-  centre; no horizontal scroll at 375 px.
+  centre. Stage 4b was checked on a copy of a paid Opus sim DB (pointed
+  to with `VILLAGE_DB_PATH`, manual ticks off — no API calls): Thomas's
+  self-planned Smithy visit and its reason, the scene where he promised
+  it, both sides' memories of the promise. No horizontal scroll at
+  375 px.
 
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
@@ -521,9 +548,9 @@ low) showed:
      unit prices in dialogue (4 before).
 4. a) ~~Frontend: bubbles + live panel.~~ ✅ 2026-10-16 (see §3
    Frontend). No backend change — `/conversations` already had it all.
-   b) Next, as designed: a scene-grouped log, then a villager detail view
-   (schedule timeline with the AI's `why`, needs, relationships,
-   memories).
+   Then map zoom and pan, bubbles smaller than a house (see §3 Frontend).
+   b) ~~Scene-grouped log + villager detail view.~~ ✅ 2026-10-16 — one new
+   route, `GET /villagers/{id}` (see §3 Frontend).
 5. Deploy to a dedicated instance: server-driven ticks every 60 s, manual
    ticks off.
 

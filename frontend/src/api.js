@@ -10,9 +10,9 @@ async function getJSON(path) {
 
 export const fetchMap = () => getJSON("/map");
 export const fetchVillagers = () => getJSON("/villagers");
+// One villager in full: schedule ahead, relationships both ways, memories.
+export const fetchVillager = (id) => getJSON(`/villagers/${encodeURIComponent(id)}`);
 export const fetchTime = () => getJSON("/time");
-// notable=true: trades and dialogue only, filtered server-side (see main.py).
-export const fetchHistory = (limit = 40) => getJSON(`/history?limit=${limit}&notable=true`);
 export const fetchStatus = () => getJSON("/status");
 // Newest first: the active ones plus the last few that ended, with lines,
 // offers, deals and what each side made of it afterwards.

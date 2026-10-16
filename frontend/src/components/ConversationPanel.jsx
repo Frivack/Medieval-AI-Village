@@ -6,17 +6,19 @@ import { formatCopper } from "../currency.js";
 // are rare (~15 a day), so when nobody talks the last one that ended
 // stays here, folded.
 
-const REASON = { trade: "trade", appointment: "appointment", news: "news", chat: "chat" };
-const ENDED = { goodbye: "said goodbye", "max lines": "talked it out", bedtime: "bedtime" };
+export const REASON = { trade: "trade", appointment: "appointment", news: "news", chat: "chat" };
+export const ENDED = { goodbye: "said goodbye", "max lines": "talked it out", bedtime: "bedtime" };
 
 // "7s 2c (18c each)": the unit price in plain copper reads easier than
 // "1s 8c each".
-function amount(price, quantity) {
+export function amount(price, quantity) {
   const each = quantity > 1 ? ` (${+(price / quantity).toFixed(1)}c each)` : "";
   return `${formatCopper(price)}${each}`;
 }
 
-function Line({ line, deal, colors }) {
+// One line of a conversation with what it did to the deal on the table.
+// Shared with the scene log.
+export function Line({ line, deal, colors }) {
   const o = line.offer;
   return (
     <li className="talk-line">

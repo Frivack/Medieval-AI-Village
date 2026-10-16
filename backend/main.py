@@ -12,10 +12,11 @@ from sqlalchemy.orm import Session
 from backend.config import (CLAUDE_MODEL, CONVERSATION_LLM, LLM_DAILY_CALL_LIMIT,
                             MANUAL_TICK_ENABLED, MINUTES_PER_TICK,
                             TICK_INTERVAL_SECONDS, TICKS_PER_DAY)
-from backend.database import init_db, get_db, AgentState, Conversation, TickHistory, SimState
+from backend.database import (init_db, get_db, AgentState, Conversation, Relationship,
+                              TickHistory, SimState)
 from backend.agents.loader import load_agents_from_json
 from backend.llm import usage
-from backend.sim import economy, schedule
+from backend.sim import conversation, economy, schedule
 from backend.sim.runner import run_tick_locked, tick_loop
 from backend.sim.clock import format_clock
 from backend.sim.tick_engine import game_time
@@ -79,6 +80,53 @@ def _activity(plan, now: int):
     """The schedule block in force at `now` (None before the first tick)."""
     block = schedule.current(plan, now)
     return schedule.describe(block) if block else None
+
+
+@app.get("/villagers/{agent_id}")
+def get_villager(agent_id: str, db: Session = Depends(get_db)):
+    """One villager in full, for the detail view: the schedule from now to
+    the end of tomorrow (blocks the AI added carry its reason), how they
+    feel about each other villager and how each feels back, and their
+    memories, newest first."""
+    agent = db.get(AgentState, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"No villager '{agent_id}'.")
+    sim = db.get(SimState, 1)
+    now = sim.tick if sim else 0
+    others = db.query(AgentState).filter(AgentState.id != agent_id).order_by(AgentState.name).all()
+    feel = {(r.agent_id, r.other_id): r for r in db.query(Relationship).filter(
+        or_(Relationship.agent_id == agent_id, Relationship.other_id == agent_id))}
+
+    def relation(other):
+        mine, theirs = feel.get((agent_id, other.id)), feel.get((other.id, agent_id))
+        score = (mine.affinity or 0) if mine else 0
+        back = (theirs.affinity or 0) if theirs else 0
+        last = mine.last_talk_tick if mine else None
+        return {"id": other.id, "name": other.name, "job": other.job,
+                "affinity": score, "level": conversation.affinity_level(score),
+                "their_affinity": back, "their_level": conversation.affinity_level(back),
+                "last_talk": format_clock(last) if last is not None else None}
+
+    return {
+        "id": agent.id, "name": agent.name, "age": agent.age, "job": agent.job,
+        "personality": agent.personality, "workplace": agent.workplace,
+        "location": agent.location, "status": agent.status, "wealth": agent.wealth,
+        "inventory": agent.inventory or {}, "needs": economy.needs_of(agent.job, agent.needs),
+        "now": now,
+        "schedule": [
+            {"start": b["start"], "end": b["end"],
+             "from": format_clock(b["start"]), "to": format_clock(b["end"]),
+             "do": b["do"], "at": b["at"], "with": b["with"], "why": b["why"],
+             "ai": b["source"] == schedule.AI, "current": b["start"] <= now < b["end"]}
+            for b in schedule.blocks(agent.daily_plan) if b["end"] > now
+        ],
+        "relationships": [relation(o) for o in others],
+        "memories": [
+            {"tick": m["tick"], "time": format_clock(m["tick"]), "text": m["text"],
+             "importance": m.get("importance", 1), "told": m.get("told", [])}
+            for m in reversed(agent.short_term_memory or [])
+        ],
+    }
 
 
 @app.post("/tick")
