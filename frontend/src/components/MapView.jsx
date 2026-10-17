@@ -19,18 +19,19 @@ import VillagerLayer from "./VillagerLayer.jsx";
 // viewport. It is clamped so the map always fills the viewport.
 
 const MIN_ZOOM = 1;      // the whole map, as before
-const MAX_ZOOM = 4;
+const MAX_ZOOM = 4;      // default ceiling; phones pass maxZoom={6} (the map is ~350 px wide there)
 const BUTTON_STEP = 1.5;
 const TAP_SLOP = 5;      // px a press may move and still count as a tap, not a drag
 
-const clampZoom = (z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+const clampZoom = (z, max = MAX_ZOOM) => Math.min(max, Math.max(MIN_ZOOM, z));
 
-function clampView(v, { w, h }) {
-  const z = clampZoom(v.z);
+function clampView(v, { w, h }, max = MAX_ZOOM) {
+  const z = clampZoom(v.z, max);
   return { z, x: Math.min(0, Math.max(w - w * z, v.x)), y: Math.min(0, Math.max(h - h * z, v.y)) };
 }
 
-export default function MapView({ map, villagers, bubbles = [], selectedId, onSelect, stepSeconds, time }) {
+export default function MapView({ map, villagers, bubbles = [], selectedId, onSelect, stepSeconds, time,
+                                 maxZoom = MAX_ZOOM }) {
   const viewportRef = useRef(null);
   const size = useRef({ w: 1, h: 1 });
   const pointers = useRef(new Map());   // pointerId -> last {x, y}, for drag and pinch
@@ -38,12 +39,15 @@ export default function MapView({ map, villagers, bubbles = [], selectedId, onSe
   // is a tap, which opens the villager under it; moving turns it into a drag.
   const tap = useRef(null);
   const [view, setView] = useState({ z: 1, x: 0, y: 0 });
+  // Read inside the setView callbacks, which outlive a render.
+  const max = useRef(maxZoom);
+  max.current = maxZoom;
 
   // Zoom by `factor`, keeping the map point under (cx, cy) where it is.
   const zoomAt = useCallback((factor, cx, cy) => setView((v) => {
-    const z = clampZoom(v.z * factor);
+    const z = clampZoom(v.z * factor, max.current);
     const k = z / v.z;
-    return clampView({ z, x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k }, size.current);
+    return clampView({ z, x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k }, size.current, max.current);
   }), []);
 
   // Track the viewport's size (the window can change), re-clamping the view.
@@ -56,7 +60,7 @@ export default function MapView({ map, villagers, bubbles = [], selectedId, onSe
     size.current = { w: r.width, h: r.height };
     const ro = new ResizeObserver(([entry]) => {
       size.current = { w: entry.contentRect.width, h: entry.contentRect.height };
-      setView((v) => clampView(v, size.current));
+      setView((v) => clampView(v, size.current, max.current));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -98,7 +102,7 @@ export default function MapView({ map, villagers, bubbles = [], selectedId, onSe
       const last = pts.get(e.pointerId);
       const dx = e.clientX - last.x, dy = e.clientY - last.y;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      setView((v) => clampView({ ...v, x: v.x + dx, y: v.y + dy }, size.current));
+      setView((v) => clampView({ ...v, x: v.x + dx, y: v.y + dy }, size.current, max.current));
     } else if (pts.size === 2) {                           // pinch: zoom and move
       const [a0, b0] = [...pts.values()];
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -109,9 +113,9 @@ export default function MapView({ map, villagers, bubbles = [], selectedId, onSe
       const m0 = { x: (a0.x + b0.x) / 2 - r.left, y: (a0.y + b0.y) / 2 - r.top };
       const m1 = { x: (a1.x + b1.x) / 2 - r.left, y: (a1.y + b1.y) / 2 - r.top };
       setView((v) => {
-        const z = clampZoom(v.z * (d1 / d0));
+        const z = clampZoom(v.z * (d1 / d0), max.current);
         const k = z / v.z;
-        return clampView({ z, x: m1.x - (m0.x - v.x) * k, y: m1.y - (m0.y - v.y) * k }, size.current);
+        return clampView({ z, x: m1.x - (m0.x - v.x) * k, y: m1.y - (m0.y - v.y) * k }, size.current, max.current);
       });
     }
   };
@@ -155,7 +159,7 @@ export default function MapView({ map, villagers, bubbles = [], selectedId, onSe
       {/* Buttons don't start a drag. */}
       <div className="map-zoom" onPointerDown={(e) => e.stopPropagation()}>
         <button type="button" aria-label="Zoom in" title="Zoom in (or scroll on the map)"
-                disabled={view.z >= MAX_ZOOM} onClick={() => zoomAt(BUTTON_STEP, ...centre())}>+</button>
+                disabled={view.z >= maxZoom} onClick={() => zoomAt(BUTTON_STEP, ...centre())}>+</button>
         <button type="button" aria-label="Zoom out" title="Zoom out"
                 disabled={!zoomed} onClick={() => zoomAt(1 / BUTTON_STEP, ...centre())}>−</button>
         <button type="button" aria-label="Show the whole map" title="Show the whole map"

@@ -8,10 +8,15 @@ import SceneLog from "./components/SceneLog.jsx";
 import { JOB_COLORS } from "./colors.js";
 import VillagerDetail from "./components/VillagerDetail.jsx";
 import VillagerPanel from "./components/VillagerPanel.jsx";
+import { useMedia } from "./useMedia.js";
 
 const POLL_MS = 2000;      // background refresh (catches ticks from the server loop / other clients)
 const AUTO_TICK_MS = 700;  // pace of the ▶ Auto mode
 const SCENES_PAGE = 20;    // conversations fetched at first and per "Show older scenes"
+// Phones: the map is ~350 px wide, so it zooms further, and the sidebar
+// becomes tabs under the map instead of one long column.
+const PHONE = "(max-width: 600px)";
+const TABS = [["talk", "Talking now"], ["villagers", "Villagers"], ["log", "Village log"]];
 
 export default function App() {
   const [map, setMap] = useState(null);
@@ -31,6 +36,9 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const selectedRef = useRef(null);
+  const phone = useMedia(PHONE);
+  const [tab, setTab] = useState("talk");   // phones only
+  const sidebarRef = useRef(null);
 
   // The world only changes on a tick (once a minute on the live server), so
   // the poll asks /time first and fetches the rest only when the tick moved.
@@ -98,8 +106,24 @@ export default function App() {
     selectedRef.current = id;
     setSelectedId(id);
     setDetail(null);
-    if (id) refresh(true);
+    if (id) {
+      setTab("villagers");
+      refresh(true);
+    }
   }, [refresh]);
+
+  // A villager opened from the map: bring the details into view when they
+  // open off-screen — below the map in the one-column layout. On phones,
+  // scroll to the tabs so it's clear which tab is showing.
+  useEffect(() => {
+    if (!selectedId) return;
+    const target = phone ? sidebarRef.current : document.querySelector(".villager-detail");
+    if (!target) return;
+    const top = target.getBoundingClientRect().top;
+    if (top >= 0 && top < window.innerHeight / 2) return;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ block: "start", behavior: still ? "auto" : "smooth" });
+  }, [selectedId, phone]);
   const closeDetail = useCallback(() => select(null), [select]);
 
   const showOlderScenes = useCallback(() => {
@@ -131,6 +155,8 @@ export default function App() {
     });
   }, [conversations, time, villagers]);
 
+  const talking = conversations.filter((c) => c.status === "active").length;
+
   return (
     <div className="app">
       <ControlBar
@@ -146,19 +172,45 @@ export default function App() {
         <div className="map-wrap">
           <MapView map={map} villagers={villagers} bubbles={bubbles}
                    selectedId={selectedId} onSelect={select} stepSeconds={stepSeconds}
-                   time={time} />
+                   time={time} maxZoom={phone ? 6 : 4} />
         </div>
-        <aside className="sidebar">
-          <ConversationPanel conversations={conversations} colors={colorByName} />
-          {selectedId
-            ? <VillagerDetail detail={detail} colors={colorByName}
-                              minutesPerTick={status?.minutes_per_tick} onBack={closeDetail} />
-            : <VillagerPanel villagers={villagers} onSelect={select} />}
-          <SceneLog conversations={conversations} colors={colorByName}
-                    onMore={showOlderScenes}
-                    hasMore={conversations.length >= sceneLimit.current} />
+        <aside className="sidebar" ref={sidebarRef}>
+          {phone && (
+            <div className="sidebar-tabs" role="tablist" aria-label="Village panels">
+              {TABS.map(([id, label]) => (
+                <button key={id} type="button" role="tab" id={`tab-${id}`}
+                        aria-selected={tab === id} aria-controls={`panel-${id}`}
+                        className={tab === id ? "on" : ""} onClick={() => setTab(id)}>
+                  {label}
+                  {id === "talk" && talking > 0 && <span className="tab-count">{talking}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+          <Panel id="talk" phone={phone} tab={tab}>
+            <ConversationPanel conversations={conversations} colors={colorByName} />
+          </Panel>
+          <Panel id="villagers" phone={phone} tab={tab}>
+            {selectedId
+              ? <VillagerDetail detail={detail} colors={colorByName}
+                                minutesPerTick={status?.minutes_per_tick} onBack={closeDetail} />
+              : <VillagerPanel villagers={villagers} onSelect={select} />}
+          </Panel>
+          <Panel id="log" phone={phone} tab={tab}>
+            <SceneLog conversations={conversations} colors={colorByName}
+                      onMore={showOlderScenes}
+                      hasMore={conversations.length >= sceneLimit.current} />
+          </Panel>
         </aside>
       </main>
     </div>
   );
+}
+
+// One sidebar panel. On wide screens all three show, unwrapped (the
+// sidebar's layout is unchanged); on phones only the chosen tab's.
+function Panel({ id, phone, tab, children }) {
+  if (!phone) return children;
+  if (tab !== id) return null;
+  return <div role="tabpanel" id={`panel-${id}`} aria-labelledby={`tab-${id}`}>{children}</div>;
 }

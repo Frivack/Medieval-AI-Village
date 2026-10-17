@@ -384,5 +384,30 @@ body {
      container (.map-stage), which counts as zero width, so a
      shrink-to-fit map would collapse to nothing. */
   .map-wrap { width: 100%; }
+  /* flex: 1 would now grow the map box down the column to fill a short
+     page (one phone tab) with empty panel */
+  .map-wrap { flex: none; }
   .sidebar { width: 100%; max-height: none; }
 }
+
+/* ---- phones: the sidebar as tabs under the map (App.jsx) ---- */
+.sidebar-tabs {
+  display: flex; gap: 0.3rem;
+  position: sticky; top: 0; z-index: 5;
+  padding: 0.4rem 0; background: var(--bg);
+}
+.sidebar-tabs button {
+  flex: 1; min-height: 2.6rem; padding: 0 0.4rem;
+  font: 0.9rem Georgia, serif; color: var(--muted);
+  background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 4px;
+  cursor: pointer;
+}
+.sidebar-tabs button.on { color: var(--parchment); border-color: var(--gold); background: #3a3228; }
+.sidebar-tabs button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.tab-count {
+  display: inline-block; margin-left: 0.35rem; min-width: 1.2rem; padding: 0 0.3rem;
+  border-radius: 0.6rem; background: var(--gold); color: var(--bg);
+  font: bold 0.75rem sans-serif; line-height: 1.2rem;
+}
+/* the tab already names the panel */
+[role="tabpanel"] > .talk-panel > h2, [role="tabpanel"] > .scene-log > h2 { display: none; }
