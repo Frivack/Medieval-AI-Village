@@ -32,13 +32,23 @@ export default function App() {
   const [detail, setDetail] = useState(null);
   const selectedRef = useRef(null);
 
-  const refresh = useCallback(async () => {
+  // The world only changes on a tick (once a minute on the live server), so
+  // the poll asks /time first and fetches the rest only when the tick moved.
+  // force: the view wants different data now (detail opened, older scenes).
+  const lastTick = useRef(null);
+  const refresh = useCallback(async (force = false) => {
     try {
+      const t = await fetchTime();
+      if (!force && t.tick === lastTick.current) {
+        setError(null);
+        return;
+      }
       const id = selectedRef.current;
-      const [v, t, c, d] = await Promise.all([
-        fetchVillagers(), fetchTime(), fetchConversations(sceneLimit.current),
+      const [v, c, d] = await Promise.all([
+        fetchVillagers(), fetchConversations(sceneLimit.current),
         id ? fetchVillager(id) : null,
       ]);
+      lastTick.current = t.tick;
       setVillagers(v);
       setTime(t);
       setConversations(c);
@@ -68,7 +78,7 @@ export default function App() {
     setBusy(true);
     try {
       await advanceTicks(count);
-      await refresh();
+      await refresh(true);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -88,13 +98,13 @@ export default function App() {
     selectedRef.current = id;
     setSelectedId(id);
     setDetail(null);
-    if (id) refresh();
+    if (id) refresh(true);
   }, [refresh]);
   const closeDetail = useCallback(() => select(null), [select]);
 
   const showOlderScenes = useCallback(() => {
     sceneLimit.current += SCENES_PAGE;
-    refresh();
+    refresh(true);
   }, [refresh]);
 
   const colorByName = useMemo(
