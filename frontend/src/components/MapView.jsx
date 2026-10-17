@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { displayPositions } from "../layout.js";
+import DayNight from "./DayNight.jsx";
 import SpeechBubbles from "./SpeechBubbles.jsx";
 import TerrainCanvas from "./TerrainCanvas.jsx";
 import VillagerLayer from "./VillagerLayer.jsx";
@@ -29,7 +30,7 @@ function clampView(v, { w, h }) {
   return { z, x: Math.min(0, Math.max(w - w * z, v.x)), y: Math.min(0, Math.max(h - h * z, v.y)) };
 }
 
-export default function MapView({ map, villagers, bubbles = [], selectedId, onSelect, stepSeconds }) {
+export default function MapView({ map, villagers, bubbles = [], selectedId, onSelect, stepSeconds, time }) {
   const viewportRef = useRef(null);
   const size = useRef({ w: 1, h: 1 });
   const pointers = useRef(new Map());   // pointerId -> last {x, y}, for drag and pinch
@@ -144,6 +145,7 @@ export default function MapView({ map, villagers, bubbles = [], selectedId, onSe
       >
         <div className="map-stage">
           <TerrainCanvas map={map} />
+          <DayNight map={map} time={time} villagers={villagers} />
           <VillagerLayer map={map} villagers={villagers} positions={positions}
                          selectedId={selectedId} stepSeconds={stepSeconds} />
           <SpeechBubbles bubbles={bubbles} positions={positions}

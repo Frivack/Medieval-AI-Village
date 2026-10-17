@@ -109,6 +109,13 @@ body {
 
 /* ---- villagers and names (VillagerLayer.jsx): 1cqw = one tile ---- */
 .people-layer { position: absolute; inset: 0; pointer-events: none; }
+/* day/night tint over the terrain (DayNight.jsx), under the villagers */
+.sky-layer { position: absolute; inset: 0; pointer-events: none; transition: background-color 1s linear; }
+.window-glow {
+  position: absolute; border-radius: 30%;
+  background: radial-gradient(closest-side, rgba(255, 196, 110, 0.55), rgba(255, 170, 80, 0.2) 70%, transparent);
+  transition: opacity 1s linear;
+}
 .building-label {
   position: absolute; transform: translate(-50%, -50%);
   font: bold 0.9cqw Georgia, serif; color: var(--parchment);

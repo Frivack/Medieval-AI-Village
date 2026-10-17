@@ -145,7 +145,8 @@ export default function App() {
       <main className="layout">
         <div className="map-wrap">
           <MapView map={map} villagers={villagers} bubbles={bubbles}
-                   selectedId={selectedId} onSelect={select} stepSeconds={stepSeconds} />
+                   selectedId={selectedId} onSelect={select} stepSeconds={stepSeconds}
+                   time={time} />
         </div>
         <aside className="sidebar">
           <ConversationPanel conversations={conversations} colors={colorByName} />
