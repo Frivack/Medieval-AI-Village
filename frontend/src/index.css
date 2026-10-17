@@ -131,6 +131,8 @@ body {
 .villager-dot, .villager-name { pointer-events: auto; cursor: pointer; }
 .villager.selected .villager-dot { box-shadow: 0 0 0 0.3cqw var(--gold); }
 .villager.selected .villager-name { color: var(--gold); }
+/* the walking glide (VillagerLayer.jsx) is motion: off for those who ask */
+@media (prefers-reduced-motion: reduce) { .villager { transition: none !important; } }
 
 /* ---- speech bubbles (HTML over the canvas, see SpeechBubbles.jsx) ----
    Sized in map units and smaller than a house (the Inn is 8 tiles wide):

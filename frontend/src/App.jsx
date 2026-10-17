@@ -107,6 +107,11 @@ export default function App() {
     refresh(true);
   }, [refresh]);
 
+  // How long a one-tile step takes on screen: the server's tick interval
+  // when it ticks by itself (60 s live — a walk at real-time speed), about
+  // one ▶ Auto tick otherwise.
+  const stepSeconds = status?.auto_tick ? status.tick_interval_seconds : AUTO_TICK_MS / 1000;
+
   const colorByName = useMemo(
     () => Object.fromEntries(villagers.map((v) => [v.name, JOB_COLORS[v.job]])),
     [villagers]
@@ -140,7 +145,7 @@ export default function App() {
       <main className="layout">
         <div className="map-wrap">
           <MapView map={map} villagers={villagers} bubbles={bubbles}
-                   selectedId={selectedId} onSelect={select} />
+                   selectedId={selectedId} onSelect={select} stepSeconds={stepSeconds} />
         </div>
         <aside className="sidebar">
           <ConversationPanel conversations={conversations} colors={colorByName} />

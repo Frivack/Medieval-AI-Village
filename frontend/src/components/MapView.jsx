@@ -29,7 +29,7 @@ function clampView(v, { w, h }) {
   return { z, x: Math.min(0, Math.max(w - w * z, v.x)), y: Math.min(0, Math.max(h - h * z, v.y)) };
 }
 
-export default function MapView({ map, villagers, bubbles = [], selectedId, onSelect }) {
+export default function MapView({ map, villagers, bubbles = [], selectedId, onSelect, stepSeconds }) {
   const viewportRef = useRef(null);
   const size = useRef({ w: 1, h: 1 });
   const pointers = useRef(new Map());   // pointerId -> last {x, y}, for drag and pinch
@@ -145,7 +145,7 @@ export default function MapView({ map, villagers, bubbles = [], selectedId, onSe
         <div className="map-stage">
           <TerrainCanvas map={map} />
           <VillagerLayer map={map} villagers={villagers} positions={positions}
-                         selectedId={selectedId} />
+                         selectedId={selectedId} stepSeconds={stepSeconds} />
           <SpeechBubbles bubbles={bubbles} positions={positions}
                          width={map.width} height={map.height} />
         </div>
