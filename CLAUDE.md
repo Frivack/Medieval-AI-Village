@@ -76,11 +76,17 @@ entry per agent, includes `workplace`):
   buildings with walls/floor/door). `GET /map` serializes it.
 - **A\* pathfinding:** `backend/world/pathfinding.py`, 4-directional,
   agents move **1 tile per tick**; remaining path is stored on the agent row.
+- **Standing spots** (2026-10-18): each building has up to six floor
+  tiles around its middle (`Building.spots`, `SPOT_OFFSETS` in
+  `map.py`); a villager heads for the first one nobody stands on or is
+  walking to (`free_spot`), and spawns on one. Before, everyone inside
+  stood on the middle tile and the frontend faked the spread.
 - **Actions** (`ActionType`): `MOVE`, `WORK`, `TALK`, `TRADE`, `REST`,
-  `EAT`, `OBSERVE`, executed in `backend/sim/tick_engine.py`. One
-  `TickHistory` row per agent per tick (TALK rows carry the line in
-  `dialogue`), plus one TRADE row per side of a settled deal (`gold_change`
-  column, value in copper). Settlement lives in `backend/sim/trade.py`
+  `EAT`, `OBSERVE`, executed in `backend/sim/tick_engine.py`.
+  `TickHistory` keeps only spoken lines (TALK rows carry the line in
+  `dialogue`) and one TRADE row per side of a settled deal (`gold_change`
+  column, value in copper) — since 2026-10-18; a row per villager per
+  minute was ~5,800 rows a day that nothing read. Settlement lives in `backend/sim/trade.py`
   (best offer, checks, 70–130% price clamp, settle).
 - **Conversations** (`backend/sim/conversation.py`, stage 2, since
   2026-10-16): 1:1, **one line per tick**, turns alternate; tables
@@ -271,23 +277,36 @@ entry per agent, includes `workplace`):
     limit.
 
 ### Frontend (`frontend/`, React + Vite; `frontend/dist` is committed)
-- `App.jsx` polls every 2 s: `/villagers`, `/time`,
-  `/conversations?limit=N` (N = 20, +20 per "Show older scenes"; one list
-  feeds the bubbles, Talking now and the scene log) and, while a detail
-  view is open, `/villagers/{id}`. `/history` is no longer polled.
+- `App.jsx` polls `/time` every 2 s and only when the tick moved fetches
+  `/villagers`, `/conversations?limit=N` (N = 20, +20 per "Show older
+  scenes"; one list feeds the bubbles, Talking now and the scene log) and,
+  while a detail view is open, `/villagers/{id}` (2026-10-18; the world
+  changes once a minute live, so the old poll re-sent the same
+  transcripts 30 times). Opening details, older scenes and manual ticks
+  fetch at once (`refresh(true)`). `/history` is not polled.
 - **Map** (`MapView.jsx`) is three layers in one coordinate system, all
   inside one "world" element: `TerrainCanvas.jsx` (tiles, drawn once,
   memoized — scales up as pixel art), `VillagerLayer.jsx` (dots, name
   tags, building names) and `SpeechBubbles.jsx`, both HTML so text stays
   sharp when zoomed. Everything over the canvas is placed in percent of
   the map and sized in `cqw` (`.map-stage` is a size container; 1cqw =
-  one tile). `layout.js` spreads villagers who share a tile (everyone
-  inside a building stands on its interior tile in the sim) around it by
-  name — presentation only — and puts the lower row's tags below them.
+  one tile). Villagers are drawn at the server's x/y (each has a spot
+  of their own indoors, §3 World); `layout.js` only puts the lower row's
+  tags below the dot and nudges two villagers who really share a tile
+  (walking out side by side) 0.35 tiles apart.
+- **Walking** (`VillagerLayer.jsx`, 2026-10-18): a one-tile move glides
+  over one tick (`stepSeconds`: the server's tick interval live — 60 s, a
+  walk at real-time speed — or one ▶ Auto tick), linear; the next step
+  continues from wherever the dot is. Longer jumps (+1 hour, first load)
+  snap. Off under `prefers-reduced-motion`.
+- **Day and night** (`DayNight.jsx`, 2026-10-18): a tint between the
+  terrain and the villagers follows the clock (keyframes: night blue,
+  orange sunrise/sunset, clear by day); when dark, buildings with someone
+  awake inside glow. Names and bubbles stay above it.
 - **Zoom and pan** (`MapView.jsx`, 2026-10-16): wheel zooms around the
   pointer (listener registered non-passive so the page doesn't scroll),
   `+` / `−` / Fit buttons with the zoom level, drag to move when zoomed,
-  two-finger pinch on phones; 1×–4×, one `translate()+scale()` on the
+  two-finger pinch on phones; 1×–4× (6× on phones), one `translate()+scale()` on the
   world, clamped so the map always fills the viewport. Touch:
   `touch-action: pan-y` at 1× (a swipe still scrolls the page), `none`
   when zoomed. `overflow: clip` on the viewport (a merely hidden box can
@@ -342,6 +361,16 @@ entry per agent, includes `workplace`):
   self-planned Smithy visit and its reason, the scene where he promised
   it, both sides' memories of the promise. No horizontal scroll at
   375 px.
+- **Phones** (≤ 600 px, `useMedia` in App.jsx, 2026-10-18): the sidebar
+  becomes three tabs under the map — Talking now (with a count of live
+  conversations), Villagers, Village log; wide screens render the same
+  panels unwrapped, unchanged. Tapping a villager on the map opens the
+  Villagers tab; in the one-column layout (≤ 900 px) the details scroll
+  into view when they open off-screen. In that layout `.map-wrap` needs
+  `flex: none`, or `flex: 1` stretches the map box down a short page.
+  Checked at 375 px: page = one screen (was 1,650 px), 6× zoom gives
+  ≈10 px bubble text. Shared text helpers (`signed`, `withoutDay`) live
+  in `format.js`.
 
 ### Currency
 - **Copper-based economy**, with **1 gold = 200 copper** (`backend/utils/currency.py`).
@@ -426,15 +455,29 @@ entry per agent, includes `workplace`):
   adapter changes the MAC and breaks the reservation / SSH.** Don't swap it
   without re-doing the router reservation.
 
-### Deployment — currently offline
+### Deployment — running, not public yet
 - 2026-07-14 → 07-27 the sim ran on a shared Oracle Cloud instance as a
   systemd service (rule-based only, no LLM). It was shut down there on
   2026-07-27 to isolate other workloads on that box, and must not go back.
-- Redeploy target: a **dedicated** Oracle Cloud instance (1 GB RAM,
-  Ubuntu 26.04 / Python 3.14), base-hardened 2026-10-15, app not
-  installed yet. Plan: server-driven ticks every 60 s with manual ticks
-  off (§3), the Claude API key in a root-only EnvironmentFile, a dedicated
-  Linux user with systemd sandboxing — stage 5 of the §6 redesign.
+- Since 2026-10-18 it runs on a **dedicated** Oracle Cloud instance
+  (1 GB RAM, Ubuntu 26.04 / Python 3.14) as the systemd service
+  `ai-village` — template mode for now, the app port not open yet:
+  - Code: a clone of this repo in `/opt/ai-village` with its own venv,
+    read-only to the service. Update = `git pull` + restart (the
+    committed `frontend/dist` is the whole frontend deploy).
+  - Runs as a dedicated system user (no login); uvicorn, one worker.
+  - Settings in `/etc/ai-village/ai-village.env`, the API key alone in
+    `/etc/ai-village/anthropic.env` — both root-only, read by systemd,
+    not by the service user.
+  - World DB in `/var/lib/ai-village` (`StateDirectory=`, private),
+    pointed to by `VILLAGE_DB_PATH`; the only place it can write
+    (`ProtectSystem=strict`).
+  - Sandboxed (no privileges, kernel/home/devices hidden, IPv4/IPv6/unix
+    sockets only, `@system-service` syscalls; `systemd-analyze security`
+    1.1), memory capped at 600 MB so the OOM killer picks it before sshd;
+    `Restart=on-failure`. Access log off (each visitor polls).
+  - A restart keeps the world; the village falls behind real time by the
+    downtime (the clock isn't re-synced).
 - **Addresses, SSH access, ports and procedures live in
   `CLAUDE.local.md`** (gitignored — this repo is public, so no
   infrastructure details belong in committed files).
@@ -465,8 +508,9 @@ Backend world + movement first; frontend after.
    ChromaDB retrieval as an optional layer (see §3 Memory).
 7. **Hybrid AI redesign** — agreed 2026-10-16, next up. Design and build
    order below. Absorbs the old "villager detail view" polish item.
-8. **Frontend polish, later** — day/night tint, smoother movement
-   animation, mobile layout.
+8. ~~**Frontend polish**~~ ✅ 2026-10-18 — day/night tint, walking
+   animation, phone layout (tabs), standing spots in the sim, poll only on
+   a new tick, history trimmed to lines and trades (see §3).
 
 ### Hybrid AI redesign (agreed 2026-10-16)
 
@@ -572,7 +616,9 @@ low) showed:
    b) ~~Scene-grouped log + villager detail view.~~ ✅ 2026-10-16 — one new
    route, `GET /villagers/{id}` (see §3 Frontend).
 5. Deploy to a dedicated instance: server-driven ticks every 60 s, manual
-   ticks off.
+   ticks off. **In progress** — the service runs there since 2026-10-18 in
+   template mode, not yet reachable from outside (§5 Deployment). Left:
+   open the port, then switch to Claude.
 
 ---
 
