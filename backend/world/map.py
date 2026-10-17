@@ -4,6 +4,11 @@
 from backend.config import MAP_WIDTH, MAP_HEIGHT
 from backend.world.tiles import TileType, WALKABLE, TILE_CHAR
 
+# Where villagers stand inside a building, as offsets from its middle tile,
+# in the order arrivals take them: two tiles apart sideways so name tags
+# don't overlap on screen, one row above and one below the middle.
+SPOT_OFFSETS = [(-2, -1), (2, -1), (-2, 1), (2, 1), (0, -1), (0, 1)]
+
 
 class Building:
     def __init__(self, name: str, x: int, y: int, width: int, height: int):
@@ -14,8 +19,20 @@ class Building:
         self.height = height
         # Door: middle of the south wall, one tile agents pass through.
         self.door = (x + width // 2, y + height - 1)
-        # Where an agent stands when "inside" the building.
+        # The middle tile: what "inside" means when every spot is taken.
         self.interior = (x + width // 2, y + height // 2)
+        # Standing spots on the floor (inside the walls), each villager its
+        # own. Clamping can fold two offsets onto one tile in a small
+        # building; dict.fromkeys drops the repeat and keeps the order.
+        ix, iy = self.interior
+        self.spots = list(dict.fromkeys(
+            (min(max(ix + dx, x + 1), x + width - 2), min(max(iy + dy, y + 1), y + height - 2))
+            for dx, dy in SPOT_OFFSETS))
+
+    def free_spot(self, taken) -> tuple[int, int]:
+        """The first standing spot not in `taken` (tiles others stand on or
+        are walking to); the middle tile once all are taken."""
+        return next((s for s in self.spots if s not in taken), self.interior)
 
     def contains(self, x: int, y: int) -> bool:
         return self.x <= x < self.x + self.width and self.y <= y < self.y + self.height

@@ -149,7 +149,7 @@ def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set,
     errand = _errand(agent, agents, needs)
     if errand and errand[0] != agent.location:
         place, item = errand
-        result = _start_move(agent, place, tick)
+        result = _start_move(agent, place, tick, agents)
         result["detail"] = f"set off to {place} to buy {item}"
         return result
 
@@ -161,7 +161,7 @@ def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set,
         return {"action": ActionType.OBSERVE.value,
                 "detail": f"free time at {agent.location}"}
     if agent.location != block["at"]:
-        return _start_move(agent, block["at"], tick)
+        return _start_move(agent, block["at"], tick, agents)
 
     if block["do"] == schedule.WORK:
         return _do_work(agent, time)
@@ -229,12 +229,15 @@ def _advance_along_path(agent, tick: int) -> dict:
             "detail": f"walking, {len(path)} tiles to go"}
 
 
-def _start_move(agent, target, tick: int) -> dict:
+def _start_move(agent, target, tick: int, agents=()) -> dict:
     building = village_map.buildings.get(target)
     if building is None:
         return {"action": ActionType.OBSERVE.value,
                 "detail": f"wanted to go to unknown place '{target}'"}
-    path = find_path(village_map, (agent.x, agent.y), building.interior)
+    # Head for a spot of our own inside: not where anyone stands, nor where
+    # anyone already walking is headed.
+    taken = {tuple(a.path[-1]) if a.path else (a.x, a.y) for a in agents if a.id != agent.id}
+    path = find_path(village_map, (agent.x, agent.y), building.free_spot(taken))
     if not path:
         return {"action": ActionType.OBSERVE.value,
                 "detail": f"no path to {target}"}

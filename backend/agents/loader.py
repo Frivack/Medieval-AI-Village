@@ -23,10 +23,12 @@ def load_agents_from_json(db=None):
         with open(json_path, "r") as f:
             data = json.load(f)
 
+        taken = set()
         for agent in data["agents"]:
-            # Spawn inside the building named by initial_location.
+            # Spawn on a free spot inside the building named by initial_location.
             building = village_map.buildings[agent["initial_location"]]
-            x, y = building.interior
+            x, y = building.free_spot(taken)
+            taken.add((x, y))
             db_agent = AgentState(
                 id=agent["id"],
                 name=agent["name"],

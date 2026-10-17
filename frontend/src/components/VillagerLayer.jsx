@@ -3,8 +3,9 @@ import { JOB_COLORS } from "../colors.js";
 // Villagers, their name tags and the building names, as HTML over the
 // terrain canvas. Positions are in percent of the map and sizes in cqw
 // (1cqw = one tile), so this layer scales with the map like the tiles do
-// but stays sharp at any zoom. Where each villager stands on screen comes
-// from layout.js (people sharing a tile spread out around it).
+// but stays sharp at any zoom. Where each villager stands comes from the
+// server (each has a spot of their own inside a building); layout.js
+// turns it into map units and picks the tag's side.
 
 // A villager's dot and tag carry data-villager: MapView reads it to open
 // their details on a tap. The selected one gets a ring.
