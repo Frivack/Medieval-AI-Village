@@ -13,6 +13,7 @@
 # or plan.
 import json
 import logging
+from time import monotonic
 
 import anthropic
 
@@ -43,6 +44,23 @@ class ClaudeUnavailable(Exception):
     """No usable answer from Claude this time; use the template instead."""
 
 
+# Circuit breaker. A failed request can take the whole timeout twice (one
+# retry) before it gives up, and a tick may make several: during an outage
+# one tick would take minutes and hold the tick lock all along. After
+# BREAKER_FAILURES API errors in a row, calls skip the network for
+# BREAKER_COOLDOWN_S and go straight to the template; then one call tries
+# again. A refusal or a bad reply is an answer, not an outage, and doesn't
+# count.
+BREAKER_FAILURES = 3
+BREAKER_COOLDOWN_S = 300
+_breaker = {"failures": 0, "open_until": 0.0}
+
+
+def reset_breaker() -> None:
+    """For tests and the simulator."""
+    _breaker.update(failures=0, open_until=0.0)
+
+
 _client = None
 
 
@@ -59,6 +77,8 @@ def _ask(system: str, user: str, schema: dict, max_tokens: int, model: str = Non
     model = model or CLAUDE_MODEL
     if usage.calls_today() >= LLM_DAILY_CALL_LIMIT:
         raise ClaudeUnavailable(f"daily limit of {LLM_DAILY_CALL_LIMIT} calls reached")
+    if monotonic() < _breaker["open_until"]:
+        raise ClaudeUnavailable("the API failed repeatedly; resting it for a few minutes")
     request = {
         "model": model,
         "max_tokens": max_tokens,
@@ -79,7 +99,13 @@ def _ask(system: str, user: str, schema: dict, max_tokens: int, model: str = Non
             response = client.messages.create(**request)
     except anthropic.APIError as exc:          # connection, timeout, 4xx/5xx, spend limit
         usage.record_failure()
+        _breaker["failures"] += 1
+        if _breaker["failures"] >= BREAKER_FAILURES:
+            _breaker.update(failures=0, open_until=monotonic() + BREAKER_COOLDOWN_S)
+            log.error("%d Claude API errors in a row: templates only for %d s",
+                      BREAKER_FAILURES, BREAKER_COOLDOWN_S)
         raise ClaudeUnavailable(f"{type(exc).__name__}: {exc}") from exc
+    _breaker["failures"] = 0
     # A rescued request reports the fallback model; price it as ours if
     # it's not one we know (rare, and the estimate only needs to be close).
     served = getattr(response, "model", None)

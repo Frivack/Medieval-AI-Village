@@ -17,6 +17,7 @@ from tests.helpers import EVENING, villager
 @pytest.fixture(autouse=True)
 def fresh_usage():
     usage.reset()
+    claude.reset_breaker()
 
 
 @pytest.fixture
@@ -150,6 +151,34 @@ def test_failures_raise_unavailable(views, fake, reply, stop_reason, why):
     fake(reply, stop_reason)
     with pytest.raises(claude.ClaudeUnavailable, match=why):
         claude.claude_turn(views["speaker"])
+
+
+def test_repeated_api_errors_rest_the_api_for_a_while(views, fake, monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(claude, "monotonic", lambda: clock["now"])
+    outage = anthropic.APIConnectionError(request=httpx.Request("POST", "https://example.invalid"))
+    client = fake(outage)
+    for _ in range(claude.BREAKER_FAILURES):
+        with pytest.raises(claude.ClaudeUnavailable, match="APIConnectionError"):
+            claude.claude_turn(views["speaker"])
+    assert len(client.requests) == claude.BREAKER_FAILURES
+    # Open: the next calls go straight to the template, without waiting on the network.
+    with pytest.raises(claude.ClaudeUnavailable, match="resting it"):
+        claude.claude_turn(views["speaker"])
+    assert len(client.requests) == claude.BREAKER_FAILURES
+    # After the cool-down one call tries again; a success closes it for good.
+    clock["now"] += claude.BREAKER_COOLDOWN_S + 1
+    client.reply = {"line": "Back again.", "offer": None, "response": None, "share": None, "end": False}
+    assert claude.claude_turn(views["speaker"])["line"] == "Back again."
+    assert claude._breaker["failures"] == 0
+
+
+def test_a_refusal_is_an_answer_not_an_outage(views, fake):
+    fake({"line": "x"}, "refusal")
+    for _ in range(claude.BREAKER_FAILURES + 1):
+        with pytest.raises(claude.ClaudeUnavailable, match="declined"):
+            claude.claude_turn(views["speaker"])
+    assert claude._breaker["open_until"] == 0.0
 
 
 def test_the_daily_limit_stops_calls_before_the_network(views, fake, monkeypatch):

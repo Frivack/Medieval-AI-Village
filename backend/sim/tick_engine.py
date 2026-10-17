@@ -14,7 +14,7 @@
 # templates; a failed call falls back to the template).
 from backend.config import MINUTES_PER_TICK
 from backend.database import SessionLocal, AgentState, TickHistory, SimState
-from backend.llm import providers
+from backend.llm import providers, usage
 from backend.memory.short_term import remember
 from backend.sim import conversation, economy, schedule, speech
 from backend.sim.actions import ActionType
@@ -26,7 +26,11 @@ from backend.world.pathfinding import find_path
 SPEAK, PLAN = providers.conversation_functions()
 
 
-def run_tick() -> dict:
+def run_tick(use_llm: bool = True) -> dict:
+    """One tick. use_llm=False runs it on the templates even when Claude is
+    configured — the runner does that after repeated failed ticks, so a
+    tick that keeps failing doesn't keep paying for the same calls."""
+    speak, plan = (SPEAK, PLAN) if use_llm else (speech.template_turn, speech.template_replan)
     db = SessionLocal()
     try:
         sim = db.get(SimState, 1)
@@ -52,9 +56,9 @@ def run_tick() -> dict:
         said, listening, busy = {}, {}, set()
         for convo in conversation.active(db):
             if conversation.bedtime(convo, by_id, tick):
-                conversation.end(convo, by_id, "bedtime", tick, relations, PLAN)
+                conversation.end(convo, by_id, "bedtime", tick, relations, plan)
                 continue
-            out = conversation.advance(convo, by_id, tick, relations, SPEAK, PLAN)
+            out = conversation.advance(convo, by_id, tick, relations, speak, plan)
             said[out["speaker_id"]] = out
             listening[out["partner_id"]] = out["speaker_id"]
             if not out["ended"]:
@@ -71,7 +75,8 @@ def run_tick() -> dict:
                 entry = {"action": ActionType.OBSERVE.value,
                          "detail": f"listening to {other.name if other else 'someone'}"}
             else:
-                entry = _step_agent(db, agent, agents, by_id, time, relations, busy)
+                entry = _step_agent(db, agent, agents, by_id, time, relations, busy,
+                                    speak_fn=speak, plan_fn=plan)
             db.add(TickHistory(tick=tick, agent_id=agent.id, action=entry["action"],
                                dialogue=entry.get("dialogue"), gold_change=0))
             # A deal settles both sides at once: one TRADE row per side.
@@ -82,6 +87,9 @@ def run_tick() -> dict:
                             "status": agent.status,
                             "hunger": (agent.needs or {}).get("hunger"), **entry})
 
+        # Today's LLM usage rides along with the tick, so the daily call
+        # limit survives a restart (main.py restores it at startup).
+        sim.llm_usage = usage.snapshot()
         db.commit()
         return {**time, "results": results}
     finally:
@@ -94,7 +102,11 @@ def _talk_entry(out: dict, by_id: dict) -> dict:
             "trades": out["trades"]}
 
 
-def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set) -> dict:
+def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set,
+                speak_fn=None, plan_fn=None) -> dict:
+    # The speaker/planner for this tick (run_tick passes them; defaults to
+    # the configured pair, read at call time so tests can swap them).
+    speak_fn, plan_fn = speak_fn or SPEAK, plan_fn or PLAN
     tick = time["tick"]
     needs = economy.needs_of(agent.job, agent.needs)
     plan = schedule.ensure(agent.daily_plan, agent.job, agent.workplace, tick)
@@ -110,7 +122,7 @@ def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set) -> d
     # day, once per day: keep the routine or change it.
     if (agent.status == "resting" and (block is None or block["do"] != schedule.SLEEP)
             and not schedule.is_planned(plan, time["day"])):
-        return _plan_day(agent, by_id, tick, time["day"])
+        return _plan_day(agent, by_id, tick, time["day"], plan_fn)
 
     # Hungry and carrying food → eat it, wherever we are.
     if economy.should_eat(needs, agent.inventory or {}):
@@ -124,7 +136,7 @@ def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set) -> d
         partner, reason, topic = picked
         convo = conversation.start(db, agent, partner, reason, topic, tick)
         busy |= {agent.id, partner.id}
-        out = conversation.advance(convo, by_id, tick, relations, SPEAK, PLAN)
+        out = conversation.advance(convo, by_id, tick, relations, speak_fn, plan_fn)
         if out["ended"]:
             busy -= {agent.id, partner.id}
         return _talk_entry(out, by_id)
@@ -163,13 +175,13 @@ def _step_agent(db, agent, agents, by_id, time: dict, relations, busy: set) -> d
             "detail": f"visiting {agent.location}{who}{why}"}
 
 
-def _plan_day(agent, by_id: dict, tick: int, day: int) -> dict:
+def _plan_day(agent, by_id: dict, tick: int, day: int, plan_fn=None) -> dict:
     """The wake-up planner: one call that sees today's schedule and may
     edit it (validated like any other plan). Templates keep the routine.
     Like a tool call it only edits the schedule — whatever else a planner
     returns (a memory, affinity) is dropped here."""
     agent.daily_plan = schedule.mark_planned(agent.daily_plan, day)
-    answer = PLAN(speech.wake_view(agent, tick))
+    answer = (plan_fn or PLAN)(speech.wake_view(agent, tick))
     edits = {"change": answer.get("change"), "ops": answer.get("ops")}
     record = conversation.apply_plan(edits, agent, tick, [p.name for p in by_id.values()])
     agent.status = "planning"

@@ -49,7 +49,8 @@ section described work that was never committed.)*
   with no LLM and prints everyone's most common state per hour, Inn
   arrivals, stuck agents and the end-state economy. `--llm claude
   --model X --max-cost USD` runs it with **paid** Claude calls and stops
-  at the cost cap (or when the first 5 calls all fail); `--export F`
+  at the cost cap (or when the first 3 calls all fail — where the circuit
+  breaker opens); `--export F`
   writes every speaker/planner call, the conversations and the usage as
   JSON — the stage 3 model comparison came from it.
 - `.claude/launch.json` holds the dev-server config so Claude Code's
@@ -124,6 +125,8 @@ entry per agent, includes `workplace`):
     integration) — the engine doesn't know which one it runs.
   - `GET /conversations?active=&limit=` returns transcripts with
     `replans` — the source of the bubbles, Talking now and the scene log.
+    List routes (`/conversations`, `/history`) clamp `limit` to 1..100
+    (`main.MAX_LIST`): they're public and the box has 1 GB.
 - **TRADE v2 negotiation** (`backend/sim/negotiation.py`, 2026-07-16):
   LLM seller/buyer reactions with counters clamped to 70–130% of base.
   **Unused since stage 1b** — prices come from the economy rules, and
@@ -215,6 +218,12 @@ entry per agent, includes `workplace`):
   reports both settings; the frontend swaps the tick buttons for a LIVE
   badge when manual ticking is off. Single uvicorn worker only — each
   worker would run its own loop.
+  A tick is one transaction, so a tick that fails after its Claude calls
+  rolls back and the next one would pay for the same calls again:
+  `runner.TickPolicy` runs the next 10 ticks on the templates
+  (`run_tick(use_llm=False)`) after 2 failed ticks in a row, then tries
+  the LLM again — a failure that outlasts the pause gets one paid try per
+  11 ticks.
   `VILLAGE_START_AT_LOCAL_TIME=1` makes a brand-new world (agents loaded
   into an empty DB, `agents/loader.py`) start on Day 1 at the server's
   local time of day instead of 00:00, so a real-time village sleeps when
@@ -241,7 +250,10 @@ entry per agent, includes `workplace`):
     beta endpoint with `fallbacks: "default"` (`server-side-fallback-
     2026-07-01`): a falsely refused request is re-run server-side on a
     fallback model. Refusal, `max_tokens`, API errors, unparseable JSON
-    and the daily cap all raise `ClaudeUnavailable` → template.
+    and the daily cap all raise `ClaudeUnavailable` → template. Circuit
+    breaker: after 3 API errors in a row calls skip the network for 5
+    minutes (a failing request can take the timeout twice, and a tick
+    makes several); refusals and bad replies don't count.
   - `backend/llm/prompts.py` renders views into prompts (English) and maps
     replies back (`share` comes back as a news id).
   - Settings: `VILLAGE_CLAUDE_MODEL` (default `claude-opus-5-5`, chosen
@@ -252,7 +264,11 @@ entry per agent, includes `workplace`):
     `config.py`) locally, an EnvironmentFile on the server.
   - `backend/llm/usage.py` counts today's calls, tokens and estimated
     cost per model price (Opus 5.5 cache reads are 0.05× input, the
-    others 0.1×); `GET /status` shows it under `llm`.
+    others 0.1×); `GET /status` shows it under `llm`. The count lives in
+    memory but each tick saves a snapshot in `SimState.llm_usage` and
+    startup restores today's (`main.restore_llm_usage`), so a restart —
+    deploy, `Restart=on-failure`, OOM kill — doesn't reset the daily
+    limit.
 
 ### Frontend (`frontend/`, React + Vite; `frontend/dist` is committed)
 - `App.jsx` polls every 2 s: `/villagers`, `/time`,

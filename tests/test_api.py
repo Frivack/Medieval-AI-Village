@@ -4,7 +4,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.database import Relationship, SimState, get_db
+from backend import main
+from backend.database import Conversation, Relationship, SimState, TickHistory, get_db
 from backend.main import app
 from backend.sim import schedule
 from backend.sim.clock import tick_at
@@ -52,3 +53,16 @@ def test_villager_detail(db, client):
 
 def test_unknown_villager_is_404(client):
     assert client.get("/villagers/nobody").status_code == 404
+
+
+def test_list_routes_cap_the_limit(db, client, monkeypatch):
+    monkeypatch.setattr(main, "MAX_LIST", 3)
+    for i in range(5):
+        db.add(Conversation(a_id="a", b_id="b", place="Inn", reason="chat", started_tick=i,
+                            status="ended", next_speaker_id="a", lines=[], deals=[]))
+        db.add(TickHistory(tick=i, agent_id="a", action="TALK", dialogue="Hello."))
+    db.commit()
+    assert len(client.get("/conversations?limit=100000000").json()) == 3
+    assert len(client.get("/history?limit=100000000&notable=true").json()) == 3
+    assert len(client.get("/conversations?limit=0").json()) == 1      # at least one
+

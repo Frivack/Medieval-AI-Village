@@ -103,6 +103,9 @@ class SimState(Base):
 
     id = Column(Integer, primary_key=True, default=1)
     tick = Column(Integer, default=0)
+    # Today's LLM usage (backend/llm/usage.py snapshot), saved with each tick
+    # so the daily call limit survives a restart. NULL on older rows.
+    llm_usage = Column(JSON, nullable=True)
 
 
 engine = create_engine(f"sqlite:///{DB_PATH}")

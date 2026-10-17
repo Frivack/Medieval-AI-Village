@@ -13,7 +13,7 @@ from backend.config import (CLAUDE_MODEL, CONVERSATION_LLM, LLM_DAILY_CALL_LIMIT
                             MANUAL_TICK_ENABLED, MINUTES_PER_TICK,
                             TICK_INTERVAL_SECONDS, TICKS_PER_DAY)
 from backend.database import (init_db, get_db, AgentState, Conversation, Relationship,
-                              TickHistory, SimState)
+                              SessionLocal, TickHistory, SimState)
 from backend.agents.loader import load_agents_from_json
 from backend.llm import usage
 from backend.sim import conversation, economy, schedule
@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
     # Replaces the deprecated @app.on_event("startup").
     init_db()
     load_agents_from_json()
+    restore_llm_usage()
     stop = asyncio.Event()
     loop_task = (asyncio.create_task(tick_loop(TICK_INTERVAL_SECONDS, stop))
                  if TICK_INTERVAL_SECONDS > 0 else None)
@@ -43,6 +44,19 @@ async def lifespan(app: FastAPI):
     stop.set()
     if loop_task:
         await loop_task
+
+
+def restore_llm_usage(db: Session = None) -> None:
+    """Today's LLM usage as saved with the last tick, so a restart doesn't
+    reset the daily call limit (backend/llm/usage.py)."""
+    own = db is None
+    db = db or SessionLocal()
+    try:
+        sim = db.get(SimState, 1)
+        usage.restore(sim.llm_usage if sim else None)
+    finally:
+        if own:
+            db.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -173,6 +187,16 @@ def get_map():
     return village_map.to_dict()
 
 
+# The most rows a list route returns, whatever ?limit= asks for. The routes
+# are public and the box has 1 GB: /history?limit=100000000 would load the
+# whole table (~5,800 rows a day) into memory.
+MAX_LIST = 100
+
+
+def _clamp_limit(limit: int) -> int:
+    return max(1, min(limit, MAX_LIST))
+
+
 @app.get("/history")
 def get_history(limit: int = 50, notable: bool = False, db: Session = Depends(get_db)):
     """Recent events, newest first. copper_change is +/- copper for TRADE rows.
@@ -186,7 +210,7 @@ def get_history(limit: int = 50, notable: bool = False, db: Session = Depends(ge
     if notable:
         query = query.filter(or_(TickHistory.action.in_(("TRADE", "TALK")),
                                  TickHistory.dialogue.isnot(None)))
-    rows = query.order_by(TickHistory.id.desc()).limit(limit).all()
+    rows = query.order_by(TickHistory.id.desc()).limit(_clamp_limit(limit)).all()
     return [
         {"tick": r.tick, "agent_id": r.agent_id,
          "action": r.action, "dialogue": r.dialogue,
@@ -198,11 +222,12 @@ def get_history(limit: int = 50, notable: bool = False, db: Session = Depends(ge
 @app.get("/conversations")
 def get_conversations(active: bool = False, limit: int = 10, db: Session = Depends(get_db)):
     """Recent conversations, newest first, with their full transcripts.
-    active=true: only the ones still going (the live panel's source)."""
+    active=true: only the ones still going (the live panel's source).
+    At most MAX_LIST, so the scene log reaches back that far."""
     query = db.query(Conversation)
     if active:
         query = query.filter_by(status="active")
-    rows = query.order_by(Conversation.id.desc()).limit(limit).all()
+    rows = query.order_by(Conversation.id.desc()).limit(_clamp_limit(limit)).all()
     names = {a.id: a.name for a in db.query(AgentState)}
     return [
         {"id": c.id, "a": names.get(c.a_id), "b": names.get(c.b_id),

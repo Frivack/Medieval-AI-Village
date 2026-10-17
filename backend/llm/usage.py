@@ -1,8 +1,9 @@
 # backend/llm/usage.py
-# Today's LLM calls, tokens and estimated cost, in memory (it resets when
-# the process restarts or the UTC date changes). Feeds the daily call
-# limit (config.LLM_DAILY_CALL_LIMIT) and GET /status. The tick loop's
-# thread writes and API requests read, hence the lock.
+# Today's LLM calls, tokens and estimated cost (it resets when the UTC date
+# changes). Feeds the daily call limit (config.LLM_DAILY_CALL_LIMIT) and
+# GET /status. Counted in memory; the tick engine saves a snapshot with
+# every tick and startup restores it, so a restart doesn't reset the limit.
+# The tick loop's thread writes and API requests read, hence the lock.
 import threading
 from datetime import datetime, timezone
 
@@ -69,6 +70,21 @@ def snapshot() -> dict:
     with _lock:
         _roll()
         return {"date": _today, **_stats, "cost_usd": round(_stats["cost_usd"], 6)}
+
+
+def restore(saved) -> None:
+    """Pick up today's counts after a restart, from a snapshot() the tick
+    engine stored with the last tick (SimState.llm_usage). Without this a
+    restart — a deploy, systemd's Restart=on-failure, an OOM kill — would
+    start the daily call limit from zero again. A snapshot from another
+    (UTC) day is ignored."""
+    global _stats
+    with _lock:
+        _roll()
+        if not isinstance(saved, dict) or saved.get("date") != _today:
+            return
+        fresh = _fresh()
+        _stats = {k: type(fresh[k])(saved.get(k) or 0) for k in fresh}
 
 
 def reset() -> None:

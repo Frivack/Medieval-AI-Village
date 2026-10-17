@@ -53,7 +53,7 @@ def main() -> None:
     from backend.agents.loader import load_agents_from_json
     from backend.config import CLAUDE_MODEL, TICKS_PER_DAY
     from backend.database import AgentState, Conversation, SessionLocal, init_db
-    from backend.llm import usage
+    from backend.llm import claude, usage
     from backend.sim import tick_engine
     from backend.sim.clock import format_clock
     from backend.sim.tick_engine import run_tick
@@ -143,8 +143,11 @@ def main() -> None:
                 print(f"\nstopped: estimated spend ${totals['cost_usd']:.4f} reached "
                       f"--max-cost ${args.max_cost:.2f} at {format_clock(t['tick'])}")
                 break
-            if totals["calls"] == 0 and totals["failures"] >= 5:
-                print("\nstopped: the first 5 calls all failed (see the warnings above)")
+            # The circuit breaker opens after this many API errors and then
+            # records no more, so it's also where "nothing works" shows.
+            if totals["calls"] == 0 and totals["failures"] >= claude.BREAKER_FAILURES:
+                print(f"\nstopped: the first {claude.BREAKER_FAILURES} calls all failed "
+                      "(see the warnings above)")
                 break
         for r in t["results"]:
             n, detail = r["agent"], r["detail"]
