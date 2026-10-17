@@ -1,4 +1,5 @@
 import { amount, ENDED, Line, REASON } from "./ConversationPanel.jsx";
+import { signed, withoutDay } from "../format.js";
 
 // The village's story so far: one scene per finished conversation, grouped
 // by in-game day, newest first. The folded scene says what came of it —
@@ -19,10 +20,6 @@ function planEdit(label) {
   return label;
 }
 
-function signed(n) {
-  return n > 0 ? `+${n}` : `−${Math.abs(n)}`;
-}
-
 function Scene({ c, colors }) {
   const changes = c.replans.flatMap((r) => r.applied.map((a) => ({ who: r.who, text: planEdit(a) })));
   const feelings = c.replans.filter((r) => r.affinity);
@@ -31,7 +28,7 @@ function Scene({ c, colors }) {
     <details className="scene">
       <summary>
         <span className="scene-head">
-          <span className="scene-time">{c.started.replace(/^Day \d+ /, "")}</span>
+          <span className="scene-time">{withoutDay(c.started)}</span>
           <strong>
             <span style={{ color: colors[c.a] }}>{c.a}</span> ↔{" "}
             <span style={{ color: colors[c.b] }}>{c.b}</span>
@@ -73,7 +70,7 @@ function Scene({ c, colors }) {
         </ul>
       )}
       <p className="scene-end">
-        {c.started} – {c.ended?.replace(/^Day \d+ /, "")} · {ENDED[c.end_reason] ?? c.end_reason}
+        {c.started} – {withoutDay(c.ended)} · {ENDED[c.end_reason] ?? c.end_reason}
       </p>
     </details>
   );

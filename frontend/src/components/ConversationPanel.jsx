@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { formatCopper } from "../currency.js";
+import { withoutDay } from "../format.js";
 
 // "Talking now": every conversation in progress, growing one line per
 // tick, with what each line did to the deal on the table. Conversations
@@ -61,7 +62,7 @@ function Conversation({ c, colors }) {
         <strong>{c.a} ↔ {c.b}</strong>
         <span className="talk-meta">
           {c.place} · {REASON[c.reason] ?? c.reason}
-          {c.reason === "trade" && item ? ` (${item.replace("_", " ")})` : ""} · from {c.started.replace(/^Day \d+ /, "")}
+          {c.reason === "trade" && item ? ` (${item.replace("_", " ")})` : ""} · from {withoutDay(c.started)}
           {c.status === "ended" && ` · ${ENDED[c.end_reason] ?? c.end_reason}`}
         </span>
       </header>

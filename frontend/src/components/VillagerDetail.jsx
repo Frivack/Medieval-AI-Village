@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatCopper } from "../currency.js";
 import { Gauge } from "./VillagerPanel.jsx";
+import { signed, withoutDay } from "../format.js";
 
 // One villager in full (GET /villagers/{id}): what their day looks like —
 // with the blocks the AI planned and why — how they stand, how they feel
@@ -13,8 +14,6 @@ const FEELS = { "close friend": "close friend", like: "likes", neutral: "neutral
                 wary: "wary of", dislike: "dislikes" };
 const MEMORIES_SHOWN = 12;
 
-const stripDay = (clock) => clock.replace(/^Day \d+ /, "");
-const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0");
 
 // A 24-hour bar for one in-game day. Blocks are clipped to the day; the
 // part of today that has passed is shaded (finished blocks aren't kept).
@@ -33,7 +32,7 @@ function DayBar({ label, start, perDay, now, blocks }) {
             key={b.start}
             className={`seg seg-${b.do.toLowerCase()}${b.ai ? " ai" : ""}${b.current ? " current" : ""}`}
             style={{ left: `${pct(b.start)}%`, width: `${pct(b.end) - pct(b.start)}%` }}
-            title={`${b.from}–${stripDay(b.to)} ${b.do} @ ${b.at}${b.with ? ` with ${b.with}` : ""}${b.why ? ` — ${b.why}` : ""}`}
+            title={`${b.from}–${withoutDay(b.to)} ${b.do} @ ${b.at}${b.with ? ` with ${b.with}` : ""}${b.why ? ` — ${b.why}` : ""}`}
           />
         ))}
         {nowIn && <div className="day-bar-now" style={{ left: `${pct(now)}%` }} />}
@@ -103,7 +102,7 @@ export default function VillagerDetail({ detail, colors, minutesPerTick, onBack 
       <ol className="detail-blocks">
         {d.schedule.map((b) => (
           <li key={b.start} className={`${b.ai ? "ai" : ""}${b.current ? " current" : ""}`}>
-            <span className="block-time">{b.from}–{stripDay(b.to)}</span>
+            <span className="block-time">{b.from}–{withoutDay(b.to)}</span>
             <span>
               {b.do} @ {b.at}{b.with ? ` with ${b.with}` : ""}
               {b.current && <span className="chip">now</span>}
