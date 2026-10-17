@@ -77,8 +77,12 @@ def run_tick(use_llm: bool = True) -> dict:
             else:
                 entry = _step_agent(db, agent, agents, by_id, time, relations, busy,
                                     speak_fn=speak, plan_fn=plan)
-            db.add(TickHistory(tick=tick, agent_id=agent.id, action=entry["action"],
-                               dialogue=entry.get("dialogue"), gold_change=0))
+            # History keeps what /history?notable shows: spoken lines and
+            # trades. Walking, working and sleeping already live on the agent
+            # row; a row per villager per minute was ~5,800 rows a day.
+            if entry["action"] == ActionType.TALK.value:
+                db.add(TickHistory(tick=tick, agent_id=agent.id, action=entry["action"],
+                                   dialogue=entry.get("dialogue"), gold_change=0))
             # A deal settles both sides at once: one TRADE row per side.
             for t in entry.get("trades", []):
                 db.add(TickHistory(tick=tick, agent_id=t["agent_id"], action=t["action"],

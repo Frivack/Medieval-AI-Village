@@ -145,7 +145,7 @@ def get_villager(agent_id: str, db: Session = Depends(get_db)):
 
 @app.post("/tick")
 def advance_tick(count: int = 1):
-    """Advance the simulation by `count` ticks (1 tick = 5 in-game minutes).
+    """Advance the simulation by `count` ticks (1 tick = 1 in-game minute).
 
     Manual time control for local dev. The public server turns it off
     (MANUAL_TICK_ENABLED=0): every tick costs LLM calls, so visitors must
@@ -189,7 +189,7 @@ def get_map():
 
 # The most rows a list route returns, whatever ?limit= asks for. The routes
 # are public and the box has 1 GB: /history?limit=100000000 would load the
-# whole table (~5,800 rows a day) into memory.
+# whole table into memory.
 MAX_LIST = 100
 
 
@@ -201,10 +201,9 @@ def _clamp_limit(limit: int) -> int:
 def get_history(limit: int = 50, notable: bool = False, db: Session = Depends(get_db)):
     """Recent events, newest first. copper_change is +/- copper for TRADE rows.
 
-    notable=true keeps only trades and dialogue. At 1 min/tick every
-    villager writes a row per minute, so the latest 50 raw rows cover
-    ~12 minutes — filtering after the LIMIT (client-side) left the
-    frontend log empty most of the time.
+    The tick engine writes only spoken lines and trades now. notable=true
+    still filters, for older worlds whose history has a row per villager
+    per minute.
     """
     query = db.query(TickHistory)
     if notable:
